@@ -11,5 +11,5 @@ func publishOrderbook(orderbook Orderbook) {
 }
 
 func receiveOrders() []Order {
-	return []Order{createOrder(1, "buy")}
+	return []Order{createOrder(1, BUY)}
 }

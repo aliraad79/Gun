@@ -12,13 +12,16 @@ func main() {
 	for {
 		orders := receiveOrders()
 		log.Println(orders)
-		matches := processOrders(orders)
-		log.Println(matches)
 
-		handleConditionalOrders(matches[0].match_price)
-		publishResults(matches)
-		publishOrderbook(orderbook)
+		for _, order := range orders {
+			matches := processOrders(orderbook, order)
 
+			if len(matches) > 0 {
+				handleConditionalOrders(matches[0].match_price)
+				publishResults(matches)
+			}
+			publishOrderbook(orderbook)
+		}
 	}
 
 }
