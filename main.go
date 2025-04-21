@@ -21,7 +21,7 @@ func main() {
 		matches := processOrders(orderbook, order)
 
 		if len(matches) > 0 {
-			handleConditionalOrders(matches[0].match_price)
+			handleConditionalOrders(matches[0].MatchPrice)
 			publishResults(matches)
 		}
 		publishOrderbook(orderbook)

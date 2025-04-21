@@ -3,25 +3,25 @@ package main
 import "math"
 
 type Order struct {
-	id     int64
-	symbol string
-	side   Side
-	price  float64
-	volume float64
+	ID     int64   `json:"id"`
+	Symbol string  `json:"symbol"`
+	Side   Side    `json:"side"`
+	Price  float64 `json:"price"`
+	Volume float64 `json:"volume"`
 }
 
-type Side int
+type Side string
 
 const (
-	BUY Side = iota
-	SELL
+	BUY  Side = "buy"
+	SELL Side = "sell"
 )
 
 type Match struct {
-	buy_id      int64
-	sell_id     int64
-	match_id    int64
-	match_price float64
+	BuyId      int64   `json:"buy_id"`
+	SellId     int64   `json:"sell_id"`
+	MatchId    int64   `json:"match_id"`
+	MatchPrice float64 `json:"match_price"`
 }
 
 type MatchEngineEntry struct {
@@ -35,26 +35,26 @@ type Orderbook struct {
 }
 
 func (orderbook Orderbook) add(order Order) {
-	if order.side == BUY {
+	if order.Side == BUY {
 		lastPirce := math.Inf(1)
 		for _, entry := range orderbook.buy {
-			if entry.price < order.price && order.price < lastPirce {
+			if entry.price < order.Price && order.Price < lastPirce {
 				entry.orders = append([]Order{order}, entry.orders...)
 				break
-			} else if entry.price == order.price {
+			} else if entry.price == order.Price {
 				entry.orders = append(entry.orders, order)
 				break
 			}
 			lastPirce = entry.price
 
 		}
-	} else if order.side == SELL {
+	} else if order.Side == SELL {
 		lastPirce := math.Inf(-1)
 		for _, entry := range orderbook.sell {
-			if entry.price > order.price && order.price > lastPirce {
+			if entry.price > order.Price && order.Price > lastPirce {
 				entry.orders = append([]Order{order}, entry.orders...)
 				break
-			} else if entry.price == order.price {
+			} else if entry.price == order.Price {
 				entry.orders = append(entry.orders, order)
 				break
 			}
@@ -64,16 +64,10 @@ func (orderbook Orderbook) add(order Order) {
 }
 
 func createOrder(id int64, side Side) Order {
-	return Order{id: id, side: side}
+	return Order{ID: id, Side: side}
 }
 
 func createOrderbook() Orderbook {
-	return Orderbook{buy: []MatchEngineEntry{MatchEngineEntry{price: 15.1, orders: []Order{createOrder(1, BUY)}}},
-		sell: []MatchEngineEntry{MatchEngineEntry{price: 15.1, orders: []Order{createOrder(1, BUY)}}}}
-}
-
-func createMatch() Match {
-	sellOrder := Order{id: 1, side: SELL}
-	buyOrder := Order{id: 2, side: BUY}
-	return Match{buy_id: buyOrder.id, sell_id: sellOrder.id, match_id: 1}
+	return Orderbook{buy: []MatchEngineEntry{{price: 15.1, orders: []Order{createOrder(1, BUY)}}},
+		sell: []MatchEngineEntry{{price: 15.1, orders: []Order{createOrder(1, BUY)}}}}
 }

@@ -12,21 +12,21 @@ func processOrders(orderbook Orderbook, order Order) []Match {
 func matchOrder(orderbook Orderbook, newOrder Order) []Match {
 	var matches []Match
 
-	remainVolume := newOrder.volume
+	remainVolume := newOrder.Volume
 
-	if newOrder.side == BUY {
+	if newOrder.Side == BUY {
 	outerloop:
 		for _, matchEngineEntry := range orderbook.sell {
-			if newOrder.price >= matchEngineEntry.price {
+			if newOrder.Price >= matchEngineEntry.price {
 				for i, order := range matchEngineEntry.orders {
 					if remainVolume <= 0 {
 						break outerloop
 					}
-					matches = append(matches, Match{buy_id: newOrder.id, sell_id: order.id, match_price: matchEngineEntry.price})
-					if remainVolume >= order.volume {
+					matches = append(matches, Match{BuyId: newOrder.ID, SellId: order.ID, MatchPrice: matchEngineEntry.price})
+					if remainVolume >= order.Volume {
 						matchEngineEntry.orders = matchEngineEntry.orders[i:]
 					}
-					remainVolume -= order.volume
+					remainVolume -= order.Volume
 				}
 			}
 		}
@@ -34,19 +34,19 @@ func matchOrder(orderbook Orderbook, newOrder Order) []Match {
 
 		}
 
-	} else if newOrder.side == SELL {
+	} else if newOrder.Side == SELL {
 	outerloop2:
 		for _, matchEngineEntry := range orderbook.buy {
-			if newOrder.price >= matchEngineEntry.price {
+			if newOrder.Price >= matchEngineEntry.price {
 				for i, order := range matchEngineEntry.orders {
 					if remainVolume <= 0 {
 						break outerloop2
 					}
-					matches = append(matches, Match{buy_id: order.id, sell_id: newOrder.id, match_price: matchEngineEntry.price})
-					if remainVolume >= order.volume {
+					matches = append(matches, Match{BuyId: order.ID, SellId: newOrder.ID, MatchPrice: matchEngineEntry.price})
+					if remainVolume >= order.Volume {
 						matchEngineEntry.orders = matchEngineEntry.orders[i:]
 					}
-					remainVolume -= order.volume
+					remainVolume -= order.Volume
 				}
 			}
 		}

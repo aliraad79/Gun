@@ -10,7 +10,7 @@ import (
 
 var (
 	broker  = "localhost:9092"
-	groupId = "group-id-3"
+	groupId = "groupId21"
 	NewOrderTopic   = "NewOrder"
 )
 
