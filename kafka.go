@@ -10,8 +10,8 @@ import (
 
 var (
 	broker  = "localhost:9092"
-	groupId = "group-id"
-	topic   = "orders"
+	groupId = "group-id-3"
+	NewOrderTopic   = "NewOrder"
 )
 
 func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
@@ -26,7 +26,10 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 	if err != nil {
 		panic(err)
 	}
-	c.Subscribe(topic, nil)
+
+	defer c.Close()
+
+	c.Subscribe(NewOrderTopic, nil)
 	log.Println("Start subscribing")
 
 	for {
@@ -38,14 +41,11 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 			err := json.Unmarshal(msg.Value, &order)
 			if err != nil {
 				log.Println("Error unmarshalling:", err)
-				return
+				continue
 			}
 			msgChan <- order
 		} else {
 			log.Printf("Consumer error: %v (%v)\n", err, msg)
-			break
 		}
 	}
-
-	c.Close()
 }
