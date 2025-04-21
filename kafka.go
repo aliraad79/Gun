@@ -3,15 +3,16 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"math/rand"
 	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
 var (
-	broker  = "localhost:9092"
-	groupId = "groupId21"
-	NewOrderTopic   = "NewOrder"
+	broker        = "localhost:9092"
+	groupId       = "groupId" + string(rand.Intn(100000))
+	NewOrderTopic = "NewOrder"
 )
 
 func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {

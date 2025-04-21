@@ -1,6 +1,11 @@
 package main
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"os"
+	"strings"
+)
 
 type Order struct {
 	ID     int64   `json:"id"`
@@ -25,8 +30,8 @@ type Match struct {
 }
 
 type MatchEngineEntry struct {
-	price  float64
-	orders []Order
+	Price  float64
+	Orders []Order
 }
 
 type Orderbook struct {
@@ -34,40 +39,54 @@ type Orderbook struct {
 	sell []MatchEngineEntry
 }
 
-func (orderbook Orderbook) add(order Order) {
-	if order.Side == BUY {
-		lastPirce := math.Inf(1)
-		for _, entry := range orderbook.buy {
-			if entry.price < order.Price && order.Price < lastPirce {
-				entry.orders = append([]Order{order}, entry.orders...)
-				break
-			} else if entry.price == order.Price {
-				entry.orders = append(entry.orders, order)
-				break
+func (orderbook *Orderbook) add(order Order) {
+	switch order.Side {
+	case BUY:
+		{
+			lastPirce := math.Inf(1)
+			for idx, entry := range orderbook.buy {
+				if entry.Price < order.Price && order.Price < lastPirce {
+					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+					orderbook.buy = append(orderbook.buy[:idx], append([]MatchEngineEntry{newEntry}, orderbook.buy[idx:]...)...)
+					return
+				} else if entry.Price == order.Price {
+					entry.Orders = append(entry.Orders, order)
+					return
+				}
+				lastPirce = entry.Price
 			}
-			lastPirce = entry.price
+			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+			orderbook.buy = append(orderbook.buy, newEntry)
 
 		}
-	} else if order.Side == SELL {
-		lastPirce := math.Inf(-1)
-		for _, entry := range orderbook.sell {
-			if entry.price > order.Price && order.Price > lastPirce {
-				entry.orders = append([]Order{order}, entry.orders...)
-				break
-			} else if entry.price == order.Price {
-				entry.orders = append(entry.orders, order)
-				break
+	case SELL:
+		{
+			lastPirce := math.Inf(-1)
+			for idx, entry := range orderbook.sell {
+				if entry.Price > order.Price && order.Price > lastPirce {
+					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+					orderbook.sell = append(orderbook.sell[:idx], append([]MatchEngineEntry{newEntry}, orderbook.sell[idx:]...)...)
+					return
+				} else if entry.Price == order.Price {
+					entry.Orders = append(entry.Orders, order)
+					return
+				}
+				lastPirce = entry.Price
 			}
-			lastPirce = entry.price
+
+			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+			orderbook.sell = append(orderbook.sell, newEntry)
 		}
+	default:
+		panic(fmt.Sprintf("unexpected main.Side: %#v", order.Side))
 	}
 }
 
-func createOrder(id int64, side Side) Order {
-	return Order{ID: id, Side: side}
-}
-
-func createOrderbook() Orderbook {
-	return Orderbook{buy: []MatchEngineEntry{{price: 15.1, orders: []Order{createOrder(1, BUY)}}},
-		sell: []MatchEngineEntry{{price: 15.1, orders: []Order{createOrder(1, BUY)}}}}
+func createOrderbooks() map[string]Orderbook {
+	supported_symbols := os.Getenv("SUPPORTED_SYMBOLS")
+	orderbooks := make(map[string]Orderbook)
+	for _, symbol := range strings.Split(supported_symbols, ",") {
+		orderbooks[symbol] = Orderbook{buy: []MatchEngineEntry{}, sell: []MatchEngineEntry{}}
+	}
+	return orderbooks
 }

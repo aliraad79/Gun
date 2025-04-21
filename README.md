@@ -18,3 +18,7 @@ go run .
 ```
 ## topics
 creating an Order -> NewOrder
+
+
+## complexity
+create a new order -> O(n) that n is number of price rows in order side

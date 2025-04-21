@@ -3,9 +3,17 @@ package main
 import (
 	"log"
 	"sync"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	var wg sync.WaitGroup
 	msgChan := make(chan Order)
 	wg.Add(1)
@@ -13,10 +21,11 @@ func main() {
 
 	log.Println("Starting Match Engine")
 
-	orderbook := createOrderbook()
+	orderbooks := createOrderbooks()
 
 	for order := range msgChan {
 		log.Println("Processed:", order)
+		orderbook := orderbooks[order.Symbol]
 
 		matches := processOrders(orderbook, order)
 
