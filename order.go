@@ -4,6 +4,7 @@ import "math"
 
 type Order struct {
 	id     int64
+	symbol string
 	side   Side
 	price  float64
 	volume float64

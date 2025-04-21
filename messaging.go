@@ -9,7 +9,3 @@ func publishResults(matches []Match) {
 func publishOrderbook(orderbook Orderbook) {
 	log.Println("Publishing", orderbook, "orderbook to kafka or other mediums")
 }
-
-func receiveOrders() []Order {
-	return []Order{createOrder(1, BUY)}
-}
