@@ -1,51 +1,52 @@
 package main
 
-import "log"
+import (
+	"github.com/shopspring/decimal"
+	log "github.com/sirupsen/logrus"
+)
 
-func handleConditionalOrders(lastMatchPrice float64) {
-	log.Println("handeling conditional orders based on", lastMatchPrice)
+func handleConditionalOrders(lastMatchPrice decimal.Decimal) {
+	log.Info("handeling conditional orders based on ", lastMatchPrice)
 }
 
-func processOrders(orderbook Orderbook, newOrder Order) []Match {
+func processOrder(orderbook *Orderbook, newOrder Order) []Match {
 	var matches []Match
 
 	remainVolume := newOrder.Volume
 
 	if newOrder.Side == BUY {
-	outerloop:
-		for _, matchEngineEntry := range orderbook.sell {
-			if newOrder.Price >= matchEngineEntry.Price {
+		for _, matchEngineEntry := range orderbook.Sell {
+			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if remainVolume <= 0 {
-						break outerloop
+					if remainVolume.LessThanOrEqual(decimal.Zero) {
+						break
 					}
 					matches = append(matches, Match{BuyId: newOrder.ID, SellId: order.ID, MatchPrice: matchEngineEntry.Price})
-					if remainVolume >= order.Volume {
+					if remainVolume.GreaterThanOrEqual(order.Volume) {
 						matchEngineEntry.Orders = matchEngineEntry.Orders[i:]
 					}
-					remainVolume -= order.Volume
+					remainVolume = remainVolume.Sub(order.Volume)
 				}
 			}
 		}
 	} else if newOrder.Side == SELL {
-	outerloop2:
-		for _, matchEngineEntry := range orderbook.buy {
-			if newOrder.Price >= matchEngineEntry.Price {
+		for _, matchEngineEntry := range orderbook.Buy {
+			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if remainVolume <= 0 {
-						break outerloop2
+					if remainVolume.LessThanOrEqual(decimal.Zero) {
+						break
 					}
 					matches = append(matches, Match{BuyId: order.ID, SellId: newOrder.ID, MatchPrice: matchEngineEntry.Price})
-					if remainVolume >= order.Volume {
+					if remainVolume.GreaterThanOrEqual(order.Volume) {
 						matchEngineEntry.Orders = matchEngineEntry.Orders[i:]
 					}
-					remainVolume -= order.Volume
+					remainVolume = remainVolume.Sub(order.Volume)
 				}
 			}
 		}
 	}
 
-	if remainVolume > 0 {
+	if remainVolume.GreaterThan(decimal.Zero) {
 		orderbook.add(newOrder)
 	}
 	return matches

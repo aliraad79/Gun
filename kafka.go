@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"math/rand"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
@@ -31,22 +32,22 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 	defer c.Close()
 
 	c.Subscribe(NewOrderTopic, nil)
-	log.Println("Start subscribing")
+	log.Info("Start subscribing")
 
 	for {
 		msg, err := c.ReadMessage(-1)
 		if err == nil {
-			log.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
+			log.Debug("Message on ", msg.TopicPartition, string(msg.Value))
 
 			var order Order
 			err := json.Unmarshal(msg.Value, &order)
 			if err != nil {
-				log.Println("Error unmarshalling:", err)
+				log.Error("Error unmarshalling:", err)
 				continue
 			}
 			msgChan <- order
 		} else {
-			log.Printf("Consumer error: %v (%v)\n", err, msg)
+			log.Error("Consumer error: ", err, msg)
 		}
 	}
 }

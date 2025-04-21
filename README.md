@@ -22,3 +22,7 @@ creating an Order -> NewOrder
 
 ## complexity
 create a new order -> O(n) that n is number of price rows in order side
+
+
+## storage
+For now this is memory match engine that can reaplay on the kafka messages and create last state of match engine up untill now

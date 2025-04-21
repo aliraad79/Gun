@@ -27,8 +27,22 @@ func main() {
 	
 	startTime := time.Now()
 	log.Println("Start spamming with fake orders")
-	for i := 1; i < 10; i++ {
-		order := Order{ID: int64(i), Symbol: "BTC_USDT", Side:"buy", Price: 100, Volume: 10}
+	for i := 1; i < 2; i++ {
+		order := Order{ID: int64(i), Symbol: "BTC_USDT", Side:"buy", Price: float64(100 - i), Volume: 10}
+		json_order, err := json.Marshal(order)
+		if err != nil {
+			log.Println("Error marshalling:", err)
+			return
+		}
+		p.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+			Key:            []byte(strconv.FormatInt(order.ID, 10)),
+			Value:          json_order,
+		}, nil)
+	}
+
+	for i := 1; i < 2; i++ {
+		order := Order{ID: int64(i), Symbol: "BTC_USDT", Side:"sell", Price: float64(100 - i), Volume: 5}
 		json_order, err := json.Marshal(order)
 		if err != nil {
 			log.Println("Error marshalling:", err)
