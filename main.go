@@ -35,7 +35,7 @@ func main() {
 		log.Warn(orderbook)
 
 		if len(matches) > 0 {
-			handleConditionalOrders(matches[0].MatchPrice)
+			handleConditionalOrders(matches[0].Price)
 			publishResults(matches)
 		}
 		publishOrderbook(*orderbook)

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 )
@@ -14,36 +16,48 @@ func processOrder(orderbook *Orderbook, newOrder Order) []Match {
 
 	remainVolume := newOrder.Volume
 
-	if newOrder.Side == BUY {
-		for _, matchEngineEntry := range orderbook.Sell {
+loop:
+	switch newOrder.Side {
+	case BUY:
+		for idx, matchEngineEntry := range orderbook.Sell {
 			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
 					if remainVolume.LessThanOrEqual(decimal.Zero) {
-						break
+						break loop
 					}
-					matches = append(matches, Match{BuyId: newOrder.ID, SellId: order.ID, MatchPrice: matchEngineEntry.Price})
+					matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
 					if remainVolume.GreaterThanOrEqual(order.Volume) {
-						matchEngineEntry.Orders = matchEngineEntry.Orders[i:]
+						orderbook.Sell[idx].Orders = orderbook.Sell[idx].Orders[i:]
+						matchCandidate.Volume = order.Volume
+					} else {
+						matchCandidate.Volume = remainVolume
 					}
 					remainVolume = remainVolume.Sub(order.Volume)
+					matches = append(matches, matchCandidate)
 				}
 			}
 		}
-	} else if newOrder.Side == SELL {
-		for _, matchEngineEntry := range orderbook.Buy {
+	case SELL:
+		for idx, matchEngineEntry := range orderbook.Buy {
 			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
 					if remainVolume.LessThanOrEqual(decimal.Zero) {
-						break
+						break loop
 					}
-					matches = append(matches, Match{BuyId: order.ID, SellId: newOrder.ID, MatchPrice: matchEngineEntry.Price})
+					matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
 					if remainVolume.GreaterThanOrEqual(order.Volume) {
-						matchEngineEntry.Orders = matchEngineEntry.Orders[i:]
+						orderbook.Buy[idx].Orders = orderbook.Buy[idx].Orders[i:]
+						matchCandidate.Volume = order.Volume
+					} else {
+						matchCandidate.Volume = remainVolume
 					}
 					remainVolume = remainVolume.Sub(order.Volume)
+					matches = append(matches, matchCandidate)
 				}
 			}
 		}
+	default:
+		panic(fmt.Sprintf("unexpected main.Side: %#v", newOrder.Side))
 	}
 
 	if remainVolume.GreaterThan(decimal.Zero) {
