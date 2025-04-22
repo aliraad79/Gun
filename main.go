@@ -7,6 +7,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/joho/godotenv"
+
+	"github.com/aliraad79/Gun/data"
 )
 
 func main() {
@@ -23,7 +25,7 @@ func main() {
 	wg.Add(1)
 	go startConsumer(&wg, instrumentChan)
 
-	orderbooks := make(map[string]*Orderbook)
+	orderbooks := make(map[string]*data.Orderbook)
 
 	log.Info("Starting Match Engine")
 
@@ -33,7 +35,9 @@ func main() {
 		switch instrument.Command {
 
 		case NEW_ORDER_CMD:
-			processNewOrders(orderbooks, instrument.Value)
+			processNewOrder(orderbooks, instrument.Value)
+		case CANCEL_ORDER_CMD:
+			cancelOrder(orderbooks, instrument.Value)
 		default:
 			panic(fmt.Sprintf("unexpected main.Command: %#v", instrument.Command))
 		}

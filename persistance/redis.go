@@ -1,17 +1,19 @@
-package main
+package persistance
 
 import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/aliraad79/Gun/data"
+	"github.com/aliraad79/Gun/utils"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/go-redis/redis"
 )
 
-func commitOrderBook(orderbook Orderbook) {
+func CommitOrderBook(orderbook data.Orderbook) {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     getEnvOrDefault("REDIS_URL", "localhost:6379"),
+		Addr:     utils.GetEnvOrDefault("REDIS_URL", "localhost:6379"),
 		Password: "",
 		DB:       0,
 	})
@@ -28,9 +30,9 @@ func commitOrderBook(orderbook Orderbook) {
 	}
 }
 
-func loadOrderbook(symbol string) *Orderbook {
+func LoadOrderbook(symbol string) *data.Orderbook {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     getEnvOrDefault("REDIS_URL", "localhost:6379"),
+		Addr:     utils.GetEnvOrDefault("REDIS_URL", "localhost:6379"),
 		Password: "",
 		DB:       0,
 	})
@@ -46,7 +48,7 @@ func loadOrderbook(symbol string) *Orderbook {
 		return nil
 	}
 
-	orderbook := Orderbook{}
+	orderbook := data.Orderbook{}
 	err = json.Unmarshal([]byte(jsonStringOrderbook), &orderbook)
 	if err != nil {
 		log.Error("Can't unmarshall for ", symbol, " from persistance memory ", err)

@@ -4,23 +4,26 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/aliraad79/Gun/data"
+	"github.com/aliraad79/Gun/utils"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
 const (
-	BROKER_URL      = "localhost:9092"
-	GROUP_ID        = "groupId"
-	NEW_ORDER_TOPIC = "NewOrder"
+	BROKER_URL         = "localhost:9092"
+	GROUP_ID           = "groupId"
+	NEW_ORDER_TOPIC    = "NewOrder"
+	CANCEL_ORDER_TOPIC = "CancelOrder"
 )
 
 func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
 	defer wg.Done()
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": getEnvOrDefault("KAFKA_BROKER_URL", BROKER_URL),
-		"group.id":          getEnvOrDefault("KAFKA_GROUP_ID", GROUP_ID),
+		"bootstrap.servers": utils.GetEnvOrDefault("KAFKA_BROKER_URL", BROKER_URL),
+		"group.id":          utils.GetEnvOrDefault("KAFKA_GROUP_ID", GROUP_ID),
 		"auto.offset.reset": "earliest",
 	})
 
@@ -30,23 +33,33 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
 
 	defer c.Close()
 
-	c.Subscribe(NEW_ORDER_TOPIC, nil)
+	c.SubscribeTopics([]string{NEW_ORDER_TOPIC, CANCEL_ORDER_TOPIC}, nil)
 	log.Info("Start subscribing")
 
 	for {
-		msg, err := c.ReadMessage(-1)
-		if err == nil {
+		if msg, err := c.ReadMessage(-1); err != nil {
+			log.Error("Consumer error: ", err, msg)
+		} else {
 			log.Debug("Message on ", msg.TopicPartition, string(msg.Value))
 
-			var order Order
-			err := json.Unmarshal(msg.Value, &order)
-			if err != nil {
-				log.Error("Error unmarshalling:", err)
-				continue
+			switch *msg.TopicPartition.Topic {
+			case NEW_ORDER_TOPIC:
+				var order data.Order
+				err := json.Unmarshal(msg.Value, &order)
+				if err != nil {
+					log.Error("Error unmarshalling:", err)
+					continue
+				}
+				msgChan <- Instrument{Command: NEW_ORDER_CMD, Value: order}
+			case CANCEL_ORDER_TOPIC:
+				var order data.Order
+				err := json.Unmarshal(msg.Value, &order)
+				if err != nil {
+					log.Error("Error unmarshalling: ", err, " value: ", msg.Value)
+					continue
+				}
+				msgChan <- Instrument{Command: CANCEL_ORDER_CMD, Value: order}
 			}
-			msgChan <- Instrument{Command: NEW_ORDER_CMD, Value: order}
-		} else {
-			log.Error("Consumer error: ", err, msg)
 		}
 	}
 }

@@ -1,36 +1,55 @@
 package main
 
 import (
+	"github.com/aliraad79/Gun/data"
+	"github.com/aliraad79/Gun/matchEngine"
+	"github.com/aliraad79/Gun/persistance"
 	log "github.com/sirupsen/logrus"
 )
 
 type Command string
 
 const (
-	NEW_ORDER_CMD Command = "new_order"
+	NEW_ORDER_CMD    Command = "new_order"
+	CANCEL_ORDER_CMD Command = "cancel_order"
 )
 
 type Instrument struct {
 	Command Command
-	Value   Order
+	Value   data.Order
 }
 
-func processNewOrders(orderbooks map[string]*Orderbook, order Order) {
+func processNewOrder(orderbooks map[string]*data.Orderbook, order data.Order) {
 
-	orderbook, err := loadOrFetchOrderbook(orderbooks, order.Symbol)
+	orderbook, err := matchEngine.LoadOrFetchOrderbook(orderbooks, order.Symbol)
 	if err != nil {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
 
-	matches := processOrder(orderbook, order)
+	matches := matchEngine.AddNewOrder(orderbook, order)
 
 	if len(matches) > 0 {
-		handleConditionalOrders(matches[0].Price)
+		matchEngine.HandleConditionalOrders(matches[0].Price)
 		publishResults(matches)
 	}
 	publishOrderbook(*orderbook)
 
-	commitOrderBook(*orderbook)
+	persistance.CommitOrderBook(*orderbook)
 
+}
+
+func cancelOrder(orderbooks map[string]*data.Orderbook, order data.Order) {
+
+	orderbook, err := matchEngine.LoadOrFetchOrderbook(orderbooks, order.Symbol)
+	if err != nil {
+		log.Error("No orderbook was found for ", order.Symbol)
+		return
+	}
+
+	matchEngine.AddNewOrder(orderbook, order)
+
+	publishOrderbook(*orderbook)
+
+	persistance.CommitOrderBook(*orderbook)
 }
