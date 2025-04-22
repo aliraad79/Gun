@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"math/rand"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -10,18 +9,18 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
-var (
-	broker        = "localhost:9092"
-	groupId       = "groupId" + string(rand.Intn(100000))
-	NewOrderTopic = "NewOrder"
+const (
+	BROKER_URL        = "localhost:9092"
+	GROUP_ID       = "groupId"
+	NEW_ORDER_TOPIC = "NewOrder"
 )
 
 func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 	defer wg.Done()
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": broker,
-		"group.id":          groupId,
+		"bootstrap.servers": getEnvOrDefault("KAFKA_BROKER_URL", BROKER_URL),
+		"group.id":          getEnvOrDefault("KAFKA_GROUP_ID", GROUP_ID),
 		"auto.offset.reset": "earliest",
 	})
 
@@ -31,7 +30,7 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 
 	defer c.Close()
 
-	c.Subscribe(NewOrderTopic, nil)
+	c.Subscribe(NEW_ORDER_TOPIC, nil)
 	log.Info("Start subscribing")
 
 	for {

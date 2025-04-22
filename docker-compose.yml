@@ -1,4 +1,11 @@
 services:
+
+  app:
+    build:
+      context: .
+    depends_on:
+      - kafka
+
   zoo:
     image: confluentinc/cp-zookeeper:7.8.0
     hostname: zoo
