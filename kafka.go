@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	BROKER_URL        = "localhost:9092"
-	GROUP_ID       = "groupId"
+	BROKER_URL      = "localhost:9092"
+	GROUP_ID        = "groupId"
 	NEW_ORDER_TOPIC = "NewOrder"
 )
 
-func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
+func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
 	defer wg.Done()
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
@@ -44,7 +44,7 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Order) {
 				log.Error("Error unmarshalling:", err)
 				continue
 			}
-			msgChan <- order
+			msgChan <- Instrument{Command: NEW_ORDER_CMD, Value: order}
 		} else {
 			log.Error("Consumer error: ", err, msg)
 		}

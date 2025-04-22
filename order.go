@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -37,8 +38,9 @@ type MatchEngineEntry struct {
 }
 
 type Orderbook struct {
-	Buy  []MatchEngineEntry
-	Sell []MatchEngineEntry
+	Buy    []MatchEngineEntry
+	Sell   []MatchEngineEntry
+	Symbol string
 }
 
 func (orderbook *Orderbook) add(order Order) {
@@ -83,11 +85,31 @@ func (orderbook *Orderbook) add(order Order) {
 	}
 }
 
-func createOrderbooks() map[string]*Orderbook {
+var ErrNotValidSymbol = errors.New("item not found")
+
+func createOrderbooks(symbol string) (*Orderbook, error) {
 	supported_symbols := os.Getenv("SUPPORTED_SYMBOLS")
-	orderbooks := make(map[string]*Orderbook)
-	for _, symbol := range strings.Split(supported_symbols, ",") {
-		orderbooks[symbol] = &Orderbook{}
+	symbols := strings.Split(supported_symbols, ",")
+
+	if contains(symbols, symbol) {
+		return &Orderbook{Symbol: symbol}, nil
 	}
-	return orderbooks
+	return nil, ErrNotValidSymbol
+}
+
+func loadOrFetchOrderbook(memory map[string]*Orderbook, symbol string) (*Orderbook, error) {
+	_, exists := memory[symbol]
+	if exists {
+		return memory[symbol], nil
+	} else {
+		var err error
+
+		orderbook := loadOrderbook(symbol)
+		if orderbook == nil {
+			orderbook, err = createOrderbooks(symbol)
+		}
+		log.Warn("pp ", orderbook)
+		memory[symbol] = orderbook
+		return orderbook, err
+	}
 }

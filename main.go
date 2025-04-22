@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -18,27 +19,25 @@ func main() {
 	log.SetLevel(log.DebugLevel)
 
 	var wg sync.WaitGroup
-	msgChan := make(chan Order)
+	instrumentChan := make(chan Instrument, 1000)
 	wg.Add(1)
-	go startConsumer(&wg, msgChan)
+	go startConsumer(&wg, instrumentChan)
+
+	orderbooks := make(map[string]*Orderbook)
 
 	log.Info("Starting Match Engine")
 
-	orderbooks := createOrderbooks()
+	for instrument := range instrumentChan {
+		log.Debug("Processed:", instrument)
 
-	for order := range msgChan {
-		log.Debug("Processed:", order)
-		orderbook := orderbooks[order.Symbol]
+		switch instrument.Command {
 
-		matches := processOrder(orderbook, order)
-
-		log.Warn(orderbook)
-
-		if len(matches) > 0 {
-			handleConditionalOrders(matches[0].Price)
-			publishResults(matches)
+		case NEW_ORDER_CMD:
+			processNewOrders(orderbooks, instrument.Value)
+		default:
+			panic(fmt.Sprintf("unexpected main.Command: %#v", instrument.Command))
 		}
-		publishOrderbook(*orderbook)
 	}
+
 	wg.Wait()
 }
