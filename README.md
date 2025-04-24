@@ -22,6 +22,9 @@ creating an Order -> NewOrder
 
 ## complexity
 create a new order -> O(n) that n is number of price rows in order side
+cancel a order -> O(nm) that n is number of price rows in order side and m orders in that price
+
+both can be replace by log(n) using binary search
 
 
 ## storage

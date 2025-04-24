@@ -7,10 +7,12 @@ import (
 	"os"
 	"strings"
 
-	. "github.com/aliraad79/Gun/data"
+	. "github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
 	utils "github.com/aliraad79/Gun/utils"
 	"github.com/shopspring/decimal"
+
+	"github.com/go-redis/redis"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -73,64 +75,47 @@ loop:
 	return matches
 }
 
-func CancelOrder(orderbook *Orderbook, newOrder Order) []Match {
-	var matches []Match
+var ErrCancelOrderFailed = errors.New("cancelling order failed")
 
-	remainVolume := newOrder.Volume
+func CancelOrder(orderbook *Orderbook, _order Order) error {
 
-loop:
-	switch newOrder.Side {
+	switch _order.Side {
 	case BUY:
-		for idx, matchEngineEntry := range orderbook.Sell {
-			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
+		for idx, matchEngineEntry := range orderbook.Buy {
+			if _order.Price.Equal(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if remainVolume.LessThanOrEqual(decimal.Zero) {
-						break loop
+					if order.ID == _order.ID {
+						orders := matchEngineEntry.Orders
+
+						orderbook.Buy[idx].Orders = append(orders[:i], orders[i+1:]...)
+						return nil
 					}
-					matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
-					if remainVolume.GreaterThanOrEqual(order.Volume) {
-						orderbook.Sell[idx].Orders = orderbook.Sell[idx].Orders[i:]
-						matchCandidate.Volume = order.Volume
-					} else {
-						matchCandidate.Volume = remainVolume
-					}
-					remainVolume = remainVolume.Sub(order.Volume)
-					matches = append(matches, matchCandidate)
 				}
 			}
 		}
 	case SELL:
-		for idx, matchEngineEntry := range orderbook.Buy {
-			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
+		for idx, matchEngineEntry := range orderbook.Sell {
+			if _order.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if remainVolume.LessThanOrEqual(decimal.Zero) {
-						break loop
+					if order.ID == _order.ID {
+						orders := matchEngineEntry.Orders
+
+						orderbook.Sell[idx].Orders = append(orders[:i], orders[i+1:]...)
+						return nil
 					}
-					matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
-					if remainVolume.GreaterThanOrEqual(order.Volume) {
-						orderbook.Buy[idx].Orders = orderbook.Buy[idx].Orders[i:]
-						matchCandidate.Volume = order.Volume
-					} else {
-						matchCandidate.Volume = remainVolume
-					}
-					remainVolume = remainVolume.Sub(order.Volume)
-					matches = append(matches, matchCandidate)
 				}
 			}
 		}
 	default:
-		panic(fmt.Sprintf("unexpected main.Side: %#v", newOrder.Side))
+		panic(fmt.Sprintf("unexpected main.Side: %#v", _order.Side))
 	}
 
-	if remainVolume.GreaterThan(decimal.Zero) {
-		orderbook.Add(newOrder)
-	}
-	return matches
+	return ErrCancelOrderFailed
 }
 
 var ErrNotValidSymbol = errors.New("item not found")
 
-func createOrderbooks(symbol string) (*Orderbook, error) {
+func createOrderbook(symbol string) (*Orderbook, error) {
 	supported_symbols := os.Getenv("SUPPORTED_SYMBOLS")
 	symbols := strings.Split(supported_symbols, ",")
 
@@ -140,19 +125,18 @@ func createOrderbooks(symbol string) (*Orderbook, error) {
 	return nil, ErrNotValidSymbol
 }
 
-func LoadOrFetchOrderbook(memory map[string]*Orderbook, symbol string) (*Orderbook, error) {
+func LoadOrFetchOrderbook(memory map[string]*Orderbook, symbol string, rdb *redis.Client) (*Orderbook, error) {
 	_, exists := memory[symbol]
 	if exists {
 		return memory[symbol], nil
 	} else {
 		var err error
 
-		orderbook := persistance.LoadOrderbook(symbol)
+		orderbook := persistance.LoadOrderbook(symbol, rdb)
 
 		if orderbook == nil {
-			orderbook, err = createOrderbooks(symbol)
+			orderbook, err = createOrderbook(symbol)
 		}
-		log.Warn("pp ", orderbook)
 		memory[symbol] = orderbook
 		return orderbook, err
 	}

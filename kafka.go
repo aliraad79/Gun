@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 
-	"github.com/aliraad79/Gun/data"
+	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/utils"
 	log "github.com/sirupsen/logrus"
 
@@ -12,10 +13,9 @@ import (
 )
 
 const (
-	BROKER_URL         = "localhost:9092"
-	GROUP_ID           = "groupId"
-	NEW_ORDER_TOPIC    = "NewOrder"
-	CANCEL_ORDER_TOPIC = "CancelOrder"
+	BROKER_URL = "localhost:9092"
+	GROUP_ID   = "groupId"
+	TOPIC      = "main_topic"
 )
 
 func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
@@ -33,7 +33,7 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
 
 	defer c.Close()
 
-	c.SubscribeTopics([]string{NEW_ORDER_TOPIC, CANCEL_ORDER_TOPIC}, nil)
+	c.Subscribe(TOPIC, nil)
 	log.Info("Start subscribing")
 
 	for {
@@ -42,23 +42,29 @@ func startConsumer(wg *sync.WaitGroup, msgChan chan Instrument) {
 		} else {
 			log.Debug("Message on ", msg.TopicPartition, string(msg.Value))
 
-			switch *msg.TopicPartition.Topic {
-			case NEW_ORDER_TOPIC:
-				var order data.Order
+			key := string(msg.Key)
+			if strings.HasPrefix(key, "create_") {
+				var order models.Order
 				err := json.Unmarshal(msg.Value, &order)
 				if err != nil {
 					log.Error("Error unmarshalling:", err)
 					continue
 				}
 				msgChan <- Instrument{Command: NEW_ORDER_CMD, Value: order}
-			case CANCEL_ORDER_TOPIC:
-				var order data.Order
+			} else if strings.HasPrefix(key, "cancel_") {
+				var order models.Order
 				err := json.Unmarshal(msg.Value, &order)
 				if err != nil {
 					log.Error("Error unmarshalling: ", err, " value: ", msg.Value)
 					continue
 				}
 				msgChan <- Instrument{Command: CANCEL_ORDER_CMD, Value: order}
+			} else if key == "start_loadtest" {
+				msgChan <- Instrument{Command: START_LOADTEST_CMD}
+			} else if key == "end_loadtest" {
+				msgChan <- Instrument{Command: END_LOADTEST_CMD}
+			} else {
+				log.Error("Not a valid key", key)
 			}
 		}
 	}

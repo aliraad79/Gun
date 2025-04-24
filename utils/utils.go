@@ -1,6 +1,9 @@
 package utils
 
-import "os"
+import (
+	"os"
+	"sync"
+)
 
 func GetEnvOrDefault(key, defaultVal string) string {
 	val := os.Getenv(key)
@@ -17,4 +20,13 @@ func Contains(list []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func GetOrCreateMutex(memory map[string]*sync.Mutex, symbol string) *sync.Mutex {
+	_, exists := memory[symbol]
+	if exists {
+		return memory[symbol]
+	} else {
+		return &sync.Mutex{}
+	}
 }
