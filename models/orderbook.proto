@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package models;
+
+option go_package = "./models";
+
+
+// Define a Person message
+message Orderbook {
+  string symbol = 1;
+  repeated MatchEngineEntry buy = 2;
+  repeated MatchEngineEntry sell = 3;
+}
+
+message MatchEngineEntry {
+    string price = 1;
+    repeated Order orders = 2;
+}
+
+message Order {
+    int64 id = 1;
+    string symbol = 2;
+    string side = 3;
+    string price = 4;
+    string volume = 5;
+}

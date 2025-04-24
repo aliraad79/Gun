@@ -29,7 +29,6 @@ func main() {
 	go startConsumer(&wg, instrumentChan)
 
 	persistance.InitClient()
-	matchEngine.InitOrderbooks()
 
 	mutexes := make(map[string]*sync.Mutex)
 

@@ -24,13 +24,13 @@ type Instrument struct {
 }
 
 func processNewOrder(mutex *sync.Mutex, order models.Order) {
+	mutex.Lock()
+
 	orderbook, err := matchEngine.LoadOrFetchOrderbook(order.Symbol)
 	if err != nil {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
-
-	mutex.Lock()
 
 	matches := matchEngine.AddNewOrder(orderbook, order)
 
@@ -46,14 +46,13 @@ func processNewOrder(mutex *sync.Mutex, order models.Order) {
 }
 
 func cancelOrder(mutex *sync.Mutex, order models.Order) {
+	mutex.Lock()
 
 	orderbook, err := matchEngine.LoadOrFetchOrderbook(order.Symbol)
 	if err != nil {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
-	mutex.Lock()
-
 	matchEngine.CancelOrder(orderbook, order)
 
 	persistance.CommitOrderBook(*orderbook)

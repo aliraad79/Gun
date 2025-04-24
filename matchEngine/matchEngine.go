@@ -15,12 +15,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var memory map[string]*Orderbook
-
-func InitOrderbooks() {
-	memory = make(map[string]*Orderbook)
-}
-
 func HandleConditionalOrders(lastMatchPrice decimal.Decimal) {
 	log.Info("handeling conditional orders based on ", lastMatchPrice)
 }
@@ -131,18 +125,10 @@ func createOrderbook(symbol string) (*Orderbook, error) {
 }
 
 func LoadOrFetchOrderbook(symbol string) (*Orderbook, error) {
-	_, exists := memory[symbol]
-	if exists {
-		return memory[symbol], nil
-	} else {
-		var err error
+	orderbook := persistance.LoadOrderbook(symbol)
 
-		orderbook := persistance.LoadOrderbook(symbol)
-
-		if orderbook == nil {
-			orderbook, err = createOrderbook(symbol)
-		}
-		memory[symbol] = orderbook
-		return orderbook, err
+	if orderbook == nil {
+		return createOrderbook(symbol)
 	}
+	return orderbook, nil
 }

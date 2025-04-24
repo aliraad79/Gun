@@ -67,7 +67,7 @@ func main() {
 		Value:          []byte("{}"),
 	}, nil)
 	log.Println("Start spamming with fake orders")
-	for i := 1; i < 100000; i++ {
+	for i := 1; i < 10000; i++ {
 		order := Order{ID: i, Symbol: randomSymbol(), Side: randomSide(), Price: randomPrice(), Volume: randomVolume()}
 		if json_order, err := json.Marshal(order); err == nil {
 			p.Produce(&kafka.Message{
@@ -84,6 +84,7 @@ func main() {
 		Value:          []byte("{}"),
 	}, nil)
 
-	p.Flush(10000)
+	p.Flush(5000)
 	log.Println("All messaged send to topic", TOPIC, time.Since(startTime))
+	p.Close()
 }
