@@ -10,6 +10,7 @@ message Orderbook {
   string symbol = 1;
   repeated MatchEngineEntry buy = 2;
   repeated MatchEngineEntry sell = 3;
+  repeated Order ConditionalOrders = 4; 
 }
 
 message MatchEngineEntry {
@@ -23,4 +24,6 @@ message Order {
     string side = 3;
     string price = 4;
     string volume = 5;
+    string type = 6;
+    string trigger_price = 7;
 }

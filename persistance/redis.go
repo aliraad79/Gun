@@ -55,7 +55,7 @@ func LoadOrderbook(symbol string) *models.Orderbook {
 		log.Error("Can't unmarshall for ", symbol, " from persistance memory ", err)
 		return nil
 	}
-	orderbook := models.FromProto(*odb)
+	orderbook := models.OrderbookFromProto(*odb)
 
 	log.Debug("Fetch orderbook from persistance memory ", orderbook)
 

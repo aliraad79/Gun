@@ -23,12 +23,13 @@ const (
 
 // Define a Person message
 type Orderbook struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Symbol        string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	Buy           []*MatchEngineEntry    `protobuf:"bytes,2,rep,name=buy,proto3" json:"buy,omitempty"`
-	Sell          []*MatchEngineEntry    `protobuf:"bytes,3,rep,name=sell,proto3" json:"sell,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Symbol            string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Buy               []*MatchEngineEntry    `protobuf:"bytes,2,rep,name=buy,proto3" json:"buy,omitempty"`
+	Sell              []*MatchEngineEntry    `protobuf:"bytes,3,rep,name=sell,proto3" json:"sell,omitempty"`
+	ConditionalOrders []*Order               `protobuf:"bytes,4,rep,name=ConditionalOrders,proto3" json:"ConditionalOrders,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Orderbook) Reset() {
@@ -78,6 +79,13 @@ func (x *Orderbook) GetBuy() []*MatchEngineEntry {
 func (x *Orderbook) GetSell() []*MatchEngineEntry {
 	if x != nil {
 		return x.Sell
+	}
+	return nil
+}
+
+func (x *Orderbook) GetConditionalOrders() []*Order {
+	if x != nil {
+		return x.ConditionalOrders
 	}
 	return nil
 }
@@ -141,6 +149,8 @@ type Order struct {
 	Side          string                 `protobuf:"bytes,3,opt,name=side,proto3" json:"side,omitempty"`
 	Price         string                 `protobuf:"bytes,4,opt,name=price,proto3" json:"price,omitempty"`
 	Volume        string                 `protobuf:"bytes,5,opt,name=volume,proto3" json:"volume,omitempty"`
+	Type          string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`
+	TriggerPrice  string                 `protobuf:"bytes,7,opt,name=trigger_price,json=triggerPrice,proto3" json:"trigger_price,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -210,24 +220,41 @@ func (x *Order) GetVolume() string {
 	return ""
 }
 
+func (x *Order) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *Order) GetTriggerPrice() string {
+	if x != nil {
+		return x.TriggerPrice
+	}
+	return ""
+}
+
 var File_orderbook_proto protoreflect.FileDescriptor
 
 const file_orderbook_proto_rawDesc = "" +
 	"\n" +
-	"\x0forderbook.proto\x12\x06models\"}\n" +
+	"\x0forderbook.proto\x12\x06models\"\xba\x01\n" +
 	"\tOrderbook\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12*\n" +
 	"\x03buy\x18\x02 \x03(\v2\x18.models.MatchEngineEntryR\x03buy\x12,\n" +
-	"\x04sell\x18\x03 \x03(\v2\x18.models.MatchEngineEntryR\x04sell\"O\n" +
+	"\x04sell\x18\x03 \x03(\v2\x18.models.MatchEngineEntryR\x04sell\x12;\n" +
+	"\x11ConditionalOrders\x18\x04 \x03(\v2\r.models.OrderR\x11ConditionalOrders\"O\n" +
 	"\x10MatchEngineEntry\x12\x14\n" +
 	"\x05price\x18\x01 \x01(\tR\x05price\x12%\n" +
-	"\x06orders\x18\x02 \x03(\v2\r.models.OrderR\x06orders\"q\n" +
+	"\x06orders\x18\x02 \x03(\v2\r.models.OrderR\x06orders\"\xaa\x01\n" +
 	"\x05Order\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x12\n" +
 	"\x04side\x18\x03 \x01(\tR\x04side\x12\x14\n" +
 	"\x05price\x18\x04 \x01(\tR\x05price\x12\x16\n" +
-	"\x06volume\x18\x05 \x01(\tR\x06volumeB\n" +
+	"\x06volume\x18\x05 \x01(\tR\x06volume\x12\x12\n" +
+	"\x04type\x18\x06 \x01(\tR\x04type\x12#\n" +
+	"\rtrigger_price\x18\a \x01(\tR\ftriggerPriceB\n" +
 	"Z\b./modelsb\x06proto3"
 
 var (
@@ -251,12 +278,13 @@ var file_orderbook_proto_goTypes = []any{
 var file_orderbook_proto_depIdxs = []int32{
 	1, // 0: models.Orderbook.buy:type_name -> models.MatchEngineEntry
 	1, // 1: models.Orderbook.sell:type_name -> models.MatchEngineEntry
-	2, // 2: models.MatchEngineEntry.orders:type_name -> models.Order
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 2: models.Orderbook.ConditionalOrders:type_name -> models.Order
+	2, // 3: models.MatchEngineEntry.orders:type_name -> models.Order
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_orderbook_proto_init() }

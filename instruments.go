@@ -32,10 +32,11 @@ func processNewOrder(mutex *sync.Mutex, order models.Order) {
 		return
 	}
 
-	matches := matchEngine.AddNewOrder(orderbook, order)
+	matches := matchEngine.MatchAndAddNewOrder(orderbook, order)
 
 	if len(matches) > 0 {
-		matchEngine.HandleConditionalOrders(matches[0].Price)
+		newMatches := matchEngine.HandleConditionalOrders(orderbook, matches)
+		matches = append(matches, newMatches...)
 		go publishResults(matches)
 	}
 

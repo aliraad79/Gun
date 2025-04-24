@@ -13,9 +13,10 @@ type MatchEngineEntry struct {
 }
 
 type Orderbook struct {
-	Buy    []MatchEngineEntry
-	Sell   []MatchEngineEntry
-	Symbol string
+	Buy               []MatchEngineEntry
+	Sell              []MatchEngineEntry
+	ConditionalOrders []Order
+	Symbol            string
 }
 
 func (orderbook *Orderbook) Add(order Order) {
@@ -60,18 +61,12 @@ func (orderbook *Orderbook) Add(order Order) {
 	}
 }
 
-func FromProto(protoOrderbook protoModels.Orderbook) *Orderbook {
+func OrderbookFromProto(protoOrderbook protoModels.Orderbook) *Orderbook {
 	var Buys []MatchEngineEntry
 	for _, entry := range protoOrderbook.GetBuy() {
 		var orders []Order
 		for _, order := range entry.GetOrders() {
-			orders = append(orders, Order{
-				ID:     order.GetId(),
-				Symbol: order.GetSymbol(),
-				Side:   Side(order.Side),
-				Price:  decimal.RequireFromString(order.GetPrice()),
-				Volume: decimal.RequireFromString(order.GetVolume()),
-			})
+			orders = append(orders, OrderFromProto(order))
 		}
 		Buys = append(Buys, MatchEngineEntry{Orders: orders, Price: orders[0].Price})
 	}
@@ -79,20 +74,19 @@ func FromProto(protoOrderbook protoModels.Orderbook) *Orderbook {
 	for _, entry := range protoOrderbook.GetSell() {
 		var orders []Order
 		for _, order := range entry.GetOrders() {
-			orders = append(orders, Order{
-				ID:     order.GetId(),
-				Symbol: order.GetSymbol(),
-				Side:   Side(order.Side),
-				Price:  decimal.RequireFromString(order.GetPrice()),
-				Volume: decimal.RequireFromString(order.GetVolume()),
-			})
+			orders = append(orders, OrderFromProto(order))
 		}
 		Sells = append(Sells, MatchEngineEntry{Orders: orders, Price: orders[0].Price})
 	}
+	var conditionalOrders []Order
+	for _, order := range protoOrderbook.ConditionalOrders {
+		conditionalOrders = append(conditionalOrders, OrderFromProto(order))
+	}
 	return &Orderbook{
-		Buy:    Buys,
-		Sell:   Sells,
-		Symbol: protoOrderbook.GetSymbol(),
+		Buy:               Buys,
+		Sell:              Sells,
+		Symbol:            protoOrderbook.GetSymbol(),
+		ConditionalOrders: conditionalOrders,
 	}
 }
 
@@ -101,13 +95,7 @@ func (orderbook *Orderbook) ToProto() *protoModels.Orderbook {
 	for _, entry := range orderbook.Buy {
 		var orders []*protoModels.Order
 		for _, order := range entry.Orders {
-			orders = append(orders, &protoModels.Order{
-				Id:     order.ID,
-				Symbol: order.Symbol,
-				Side:   string(order.Side),
-				Price:  order.Price.String(),
-				Volume: order.Volume.String(),
-			})
+			orders = append(orders, order.ToProto())
 		}
 		Buys = append(Buys, &protoModels.MatchEngineEntry{Orders: orders, Price: orders[0].Price})
 	}
@@ -115,19 +103,22 @@ func (orderbook *Orderbook) ToProto() *protoModels.Orderbook {
 	for _, entry := range orderbook.Sell {
 		var orders []*protoModels.Order
 		for _, order := range entry.Orders {
-			orders = append(orders, &protoModels.Order{
-				Id:     order.ID,
-				Symbol: order.Symbol,
-				Side:   string(order.Side),
-				Price:  order.Price.String(),
-				Volume: order.Volume.String(),
-			})
+			orders = append(orders, order.ToProto())
 		}
 		Sells = append(Sells, &protoModels.MatchEngineEntry{Orders: orders, Price: orders[0].Price})
 	}
-	return &protoModels.Orderbook{
-		Buy:    Buys,
-		Sell:   Sells,
-		Symbol: orderbook.Symbol,
+	var conditionalOrders []*protoModels.Order
+	for _, order := range orderbook.ConditionalOrders {
+		conditionalOrders = append(conditionalOrders, order.ToProto())
 	}
+	return &protoModels.Orderbook{
+		Buy:               Buys,
+		Sell:              Sells,
+		Symbol:            orderbook.Symbol,
+		ConditionalOrders: conditionalOrders,
+	}
+}
+
+func (Orderbook *Orderbook) AddConditionalOrder(order Order) {
+	Orderbook.ConditionalOrders = append(Orderbook.ConditionalOrders, order)
 }
