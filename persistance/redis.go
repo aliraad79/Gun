@@ -11,8 +11,10 @@ import (
 	"github.com/go-redis/redis"
 )
 
-func RedisClient() *redis.Client {
-	return redis.NewClient(&redis.Options{
+var rdb *redis.Client
+
+func InitClient() {
+	rdb = redis.NewClient(&redis.Options{
 		Addr:     utils.GetEnvOrDefault("REDIS_URL", "localhost:6379"),
 		Password: "",
 		DB:       0,
@@ -20,7 +22,7 @@ func RedisClient() *redis.Client {
 	})
 }
 
-func CommitOrderBook(orderbook models.Orderbook, rdb *redis.Client) {
+func CommitOrderBook(orderbook models.Orderbook) {
 	jsonStringOrderbook, err := json.Marshal(orderbook)
 	if err != nil {
 		log.Error("Can't marshall for ", orderbook, " from persistance memory ", err)
@@ -33,7 +35,7 @@ func CommitOrderBook(orderbook models.Orderbook, rdb *redis.Client) {
 	}
 }
 
-func LoadOrderbook(symbol string, rdb *redis.Client) *models.Orderbook {
+func LoadOrderbook(symbol string) *models.Orderbook {
 	jsonStringOrderbook, err := rdb.Get(fmt.Sprint("Orderbook_", symbol)).Result()
 	if err != nil {
 		log.Error("Can't get value for ", symbol, " from persistance memory", err)

@@ -9,8 +9,9 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/aliraad79/Gun/models"
+	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/persistance"
+	"github.com/aliraad79/Gun/utils"
 )
 
 func main() {
@@ -27,9 +28,9 @@ func main() {
 	wg.Add(1)
 	go startConsumer(&wg, instrumentChan)
 
-	rdb := persistance.RedisClient()
+	persistance.InitClient()
+	matchEngine.InitOrderbooks()
 
-	orderbooks := make(map[string]*models.Orderbook)
 	mutexes := make(map[string]*sync.Mutex)
 
 	log.Info("Starting Match Engine")
@@ -43,9 +44,11 @@ func main() {
 
 				switch instrument.Command {
 				case NEW_ORDER_CMD:
-					processNewOrder(orderbooks, mutexes, rdb, instrument.Value)
+					mutex := utils.GetOrCreateMutex(mutexes, instrument.Value.Symbol)
+					processNewOrder(mutex, instrument.Value)
 				case CANCEL_ORDER_CMD:
-					cancelOrder(orderbooks, mutexes, rdb, instrument.Value)
+					mutex := utils.GetOrCreateMutex(mutexes, instrument.Value.Symbol)
+					cancelOrder(mutex, instrument.Value)
 				case END_LOADTEST_CMD:
 					mu.Lock()
 					log.Warn("Load test ended in ", time.Since(startTime))

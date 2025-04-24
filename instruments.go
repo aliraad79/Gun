@@ -6,8 +6,6 @@ import (
 	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
-	"github.com/aliraad79/Gun/utils"
-	"github.com/go-redis/redis"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,43 +23,41 @@ type Instrument struct {
 	Value   models.Order
 }
 
-func processNewOrder(orderbooks map[string]*models.Orderbook, mutexes map[string]*sync.Mutex, rdb *redis.Client, order models.Order) {
-
-	orderbook, err := matchEngine.LoadOrFetchOrderbook(orderbooks, order.Symbol, rdb)
+func processNewOrder(mutex *sync.Mutex, order models.Order) {
+	orderbook, err := matchEngine.LoadOrFetchOrderbook(order.Symbol)
 	if err != nil {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
 
-	mutex := utils.GetOrCreateMutex(mutexes, order.Symbol)
 	mutex.Lock()
 
 	matches := matchEngine.AddNewOrder(orderbook, order)
 
 	if len(matches) > 0 {
 		matchEngine.HandleConditionalOrders(matches[0].Price)
-		publishResults(matches)
+		go publishResults(matches)
 	}
-	publishOrderbook(*orderbook)
 
-	persistance.CommitOrderBook(*orderbook, rdb)
+	persistance.CommitOrderBook(*orderbook)
 	mutex.Unlock()
+
+	publishOrderbook(*orderbook)
 }
 
-func cancelOrder(orderbooks map[string]*models.Orderbook, mutexes map[string]*sync.Mutex, rdb *redis.Client, order models.Order) {
+func cancelOrder(mutex *sync.Mutex, order models.Order) {
 
-	orderbook, err := matchEngine.LoadOrFetchOrderbook(orderbooks, order.Symbol, rdb)
+	orderbook, err := matchEngine.LoadOrFetchOrderbook(order.Symbol)
 	if err != nil {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
-	mutex := utils.GetOrCreateMutex(mutexes, order.Symbol)
 	mutex.Lock()
 
 	matchEngine.CancelOrder(orderbook, order)
 
-	publishOrderbook(*orderbook)
-
-	persistance.CommitOrderBook(*orderbook, rdb)
+	persistance.CommitOrderBook(*orderbook)
 	mutex.Unlock()
+
+	publishOrderbook(*orderbook)
 }

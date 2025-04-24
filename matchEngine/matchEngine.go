@@ -12,9 +12,14 @@ import (
 	utils "github.com/aliraad79/Gun/utils"
 	"github.com/shopspring/decimal"
 
-	"github.com/go-redis/redis"
 	log "github.com/sirupsen/logrus"
 )
+
+var memory map[string]*Orderbook
+
+func InitOrderbooks() {
+	memory = make(map[string]*Orderbook)
+}
 
 func HandleConditionalOrders(lastMatchPrice decimal.Decimal) {
 	log.Info("handeling conditional orders based on ", lastMatchPrice)
@@ -77,14 +82,14 @@ loop:
 
 var ErrCancelOrderFailed = errors.New("cancelling order failed")
 
-func CancelOrder(orderbook *Orderbook, _order Order) error {
+func CancelOrder(orderbook *Orderbook, targetOrder Order) error {
 
-	switch _order.Side {
+	switch targetOrder.Side {
 	case BUY:
 		for idx, matchEngineEntry := range orderbook.Buy {
-			if _order.Price.Equal(matchEngineEntry.Price) {
+			if targetOrder.Price.Equal(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if order.ID == _order.ID {
+					if order.ID == targetOrder.ID {
 						orders := matchEngineEntry.Orders
 
 						orderbook.Buy[idx].Orders = append(orders[:i], orders[i+1:]...)
@@ -95,9 +100,9 @@ func CancelOrder(orderbook *Orderbook, _order Order) error {
 		}
 	case SELL:
 		for idx, matchEngineEntry := range orderbook.Sell {
-			if _order.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
+			if targetOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
 				for i, order := range matchEngineEntry.Orders {
-					if order.ID == _order.ID {
+					if order.ID == targetOrder.ID {
 						orders := matchEngineEntry.Orders
 
 						orderbook.Sell[idx].Orders = append(orders[:i], orders[i+1:]...)
@@ -107,7 +112,7 @@ func CancelOrder(orderbook *Orderbook, _order Order) error {
 			}
 		}
 	default:
-		panic(fmt.Sprintf("unexpected main.Side: %#v", _order.Side))
+		panic(fmt.Sprintf("unexpected main.Side: %#v", targetOrder.Side))
 	}
 
 	return ErrCancelOrderFailed
@@ -125,14 +130,14 @@ func createOrderbook(symbol string) (*Orderbook, error) {
 	return nil, ErrNotValidSymbol
 }
 
-func LoadOrFetchOrderbook(memory map[string]*Orderbook, symbol string, rdb *redis.Client) (*Orderbook, error) {
+func LoadOrFetchOrderbook(symbol string) (*Orderbook, error) {
 	_, exists := memory[symbol]
 	if exists {
 		return memory[symbol], nil
 	} else {
 		var err error
 
-		orderbook := persistance.LoadOrderbook(symbol, rdb)
+		orderbook := persistance.LoadOrderbook(symbol)
 
 		if orderbook == nil {
 			orderbook, err = createOrderbook(symbol)
