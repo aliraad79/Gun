@@ -2,6 +2,7 @@ package matchEngine
 
 import (
 	"fmt"
+	"slices"
 
 	"errors"
 	"os"
@@ -52,42 +53,62 @@ loop:
 	switch newOrder.Side {
 	case BUY:
 		for idx, matchEngineEntry := range orderbook.Sell {
-			// i know this is tricky but for now it do the work
-			for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
-				order := matchEngineEntry.Orders[i]
-				if remainVolume.LessThanOrEqual(decimal.Zero) {
-					break loop
+			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
+				// i know this is tricky but for now it do the work
+				for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
+					order := matchEngineEntry.Orders[i]
+					if remainVolume.LessThanOrEqual(decimal.Zero) {
+						break loop
+					}
+					matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
+					if remainVolume.GreaterThanOrEqual(order.Volume) {
+						if len(orderbook.Sell[idx].Orders) == 1 {
+							// remove the entry if it get emptied
+							orderbook.Sell = slices.Delete(orderbook.Sell, idx, idx+1)
+						} else {
+							// update the volume
+							orderbook.Sell[idx].Orders = slices.Delete(orderbook.Sell[idx].Orders, i, i+1)
+						}
+						matchCandidate.Volume = order.Volume
+					} else {
+						orderbook.Sell[idx].Orders[i].Volume = orderbook.Sell[idx].Orders[i].Volume.Sub(remainVolume)
+						matchCandidate.Volume = remainVolume
+					}
+					remainVolume = remainVolume.Sub(order.Volume)
+					matches = append(matches, matchCandidate)
 				}
-				matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
-				if remainVolume.GreaterThanOrEqual(order.Volume) {
-					orderbook.Sell[idx].Orders = append(orderbook.Sell[idx].Orders[i:], orderbook.Sell[idx].Orders[i+1:]...)
-					matchCandidate.Volume = order.Volume
-				} else {
-					orderbook.Sell[idx].Orders[i].Volume = orderbook.Sell[idx].Orders[i].Volume.Sub(remainVolume)
-					matchCandidate.Volume = remainVolume
-				}
-				remainVolume = remainVolume.Sub(order.Volume)
-				matches = append(matches, matchCandidate)
+			} else {
+				break loop
 			}
 		}
 	case SELL:
 		for idx, matchEngineEntry := range orderbook.Buy {
-			for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
-				order := matchEngineEntry.Orders[i]
+			if newOrder.Price.LessThanOrEqual(matchEngineEntry.Price) {
+				for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
+					order := matchEngineEntry.Orders[i]
 
-				if remainVolume.LessThanOrEqual(decimal.Zero) {
-					break loop
+					if remainVolume.LessThanOrEqual(decimal.Zero) {
+						break loop
+					}
+					matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
+					if remainVolume.GreaterThanOrEqual(order.Volume) {
+						if len(orderbook.Buy[idx].Orders) == 1 {
+							// remove the entry if it get emptied
+							orderbook.Buy = slices.Delete(orderbook.Buy, idx, idx+1)
+						} else {
+							// update the volume
+							orderbook.Buy[idx].Orders = slices.Delete(orderbook.Buy[idx].Orders, i, i+1)
+						}
+						matchCandidate.Volume = order.Volume
+					} else {
+						orderbook.Buy[idx].Orders[i].Volume = orderbook.Buy[idx].Orders[i].Volume.Sub(remainVolume)
+						matchCandidate.Volume = remainVolume
+					}
+					remainVolume = remainVolume.Sub(order.Volume)
+					matches = append(matches, matchCandidate)
 				}
-				matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
-				if remainVolume.GreaterThanOrEqual(order.Volume) {
-					orderbook.Buy[idx].Orders = append(orderbook.Buy[idx].Orders[i:], orderbook.Buy[idx].Orders[i+1:]...)
-					matchCandidate.Volume = order.Volume
-				} else {
-					orderbook.Buy[idx].Orders[i].Volume = orderbook.Buy[idx].Orders[i].Volume.Sub(remainVolume)
-					matchCandidate.Volume = remainVolume
-				}
-				remainVolume = remainVolume.Sub(order.Volume)
-				matches = append(matches, matchCandidate)
+			} else {
+				break loop
 			}
 		}
 	default:
@@ -111,38 +132,62 @@ loop:
 	switch newOrder.Side {
 	case BUY:
 		for idx, matchEngineEntry := range orderbook.Sell {
-			for i, order := range matchEngineEntry.Orders {
-				if remainVolume.LessThanOrEqual(decimal.Zero) {
-					break loop
-				}
-				matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
-				if remainVolume.GreaterThanOrEqual(order.Volume) {
-					orderbook.Sell[idx].Orders = orderbook.Sell[idx].Orders[i:]
-					matchCandidate.Volume = order.Volume
-				} else {
-					matchCandidate.Volume = remainVolume
-				}
-				remainVolume = remainVolume.Sub(order.Volume)
-				matches = append(matches, matchCandidate)
-			}
-		}
-	case SELL:
-		for idx, matchEngineEntry := range orderbook.Buy {
 			if newOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
-				for i, order := range matchEngineEntry.Orders {
+				// i know this is tricky but for now it do the work
+				for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
+					order := matchEngineEntry.Orders[i]
 					if remainVolume.LessThanOrEqual(decimal.Zero) {
 						break loop
 					}
-					matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
+					matchCandidate := Match{BuyId: newOrder.ID, SellId: order.ID, Price: matchEngineEntry.Price}
 					if remainVolume.GreaterThanOrEqual(order.Volume) {
-						orderbook.Buy[idx].Orders = orderbook.Buy[idx].Orders[i:]
+						if len(orderbook.Sell[idx].Orders) == 1 {
+							// remove the entry if it get emptied
+							orderbook.Sell = slices.Delete(orderbook.Sell, idx, idx+1)
+						} else {
+							// update the volume
+							orderbook.Sell[idx].Orders = slices.Delete(orderbook.Sell[idx].Orders, i, i+1)
+						}
 						matchCandidate.Volume = order.Volume
 					} else {
+						orderbook.Sell[idx].Orders[i].Volume = orderbook.Sell[idx].Orders[i].Volume.Sub(remainVolume)
 						matchCandidate.Volume = remainVolume
 					}
 					remainVolume = remainVolume.Sub(order.Volume)
 					matches = append(matches, matchCandidate)
 				}
+			} else {
+				break loop
+			}
+		}
+	case SELL:
+		for idx, matchEngineEntry := range orderbook.Buy {
+			if newOrder.Price.LessThanOrEqual(matchEngineEntry.Price) {
+				for i := len(matchEngineEntry.Orders) - 1; i >= 0; i-- {
+					order := matchEngineEntry.Orders[i]
+
+					if remainVolume.LessThanOrEqual(decimal.Zero) {
+						break loop
+					}
+					matchCandidate := Match{BuyId: order.ID, SellId: newOrder.ID, Price: matchEngineEntry.Price}
+					if remainVolume.GreaterThanOrEqual(order.Volume) {
+						if len(orderbook.Buy[idx].Orders) == 1 {
+							// remove the entry if it get emptied
+							orderbook.Buy = slices.Delete(orderbook.Buy, idx, idx+1)
+						} else {
+							// update the volume
+							orderbook.Buy[idx].Orders = slices.Delete(orderbook.Buy[idx].Orders, i, i+1)
+						}
+						matchCandidate.Volume = order.Volume
+					} else {
+						orderbook.Buy[idx].Orders[i].Volume = orderbook.Buy[idx].Orders[i].Volume.Sub(remainVolume)
+						matchCandidate.Volume = remainVolume
+					}
+					remainVolume = remainVolume.Sub(order.Volume)
+					matches = append(matches, matchCandidate)
+				}
+			} else {
+				break loop
 			}
 		}
 	default:
@@ -169,37 +214,34 @@ func handleStopLimitOrder(orderbook *Orderbook, order Order) []Match {
 
 var ErrCancelOrderFailed = errors.New("cancelling order failed")
 
-func CancelOrder(orderbook *Orderbook, targetOrder Order) error {
-
-	switch targetOrder.Side {
-	case BUY:
-		for idx, matchEngineEntry := range orderbook.Buy {
-			if targetOrder.Price.Equal(matchEngineEntry.Price) {
-				for i, order := range matchEngineEntry.Orders {
-					if order.ID == targetOrder.ID {
-						orders := matchEngineEntry.Orders
-
-						orderbook.Buy[idx].Orders = append(orders[:i], orders[i+1:]...)
-						return nil
-					}
+func CancelOrder(orderbook *Orderbook, targetOrderId int64) error {
+	for idx, matchEngineEntry := range orderbook.Buy {
+		for i, order := range matchEngineEntry.Orders {
+			if order.ID == targetOrderId {
+				if len(matchEngineEntry.Orders) == 1 {
+					// remove the entry if it get emptied
+					orderbook.Buy = slices.Delete(orderbook.Buy, idx, idx+1)
+				} else {
+					// update the volume
+					orderbook.Buy[idx].Orders = slices.Delete(orderbook.Buy[idx].Orders, i, i+1)
 				}
+				return nil
 			}
 		}
-	case SELL:
-		for idx, matchEngineEntry := range orderbook.Sell {
-			if targetOrder.Price.GreaterThanOrEqual(matchEngineEntry.Price) {
-				for i, order := range matchEngineEntry.Orders {
-					if order.ID == targetOrder.ID {
-						orders := matchEngineEntry.Orders
-
-						orderbook.Sell[idx].Orders = append(orders[:i], orders[i+1:]...)
-						return nil
-					}
+	}
+	for idx, matchEngineEntry := range orderbook.Sell {
+		for i, order := range matchEngineEntry.Orders {
+			if order.ID == targetOrderId {
+				if len(matchEngineEntry.Orders) == 1 {
+					// remove the entry if it get emptied
+					orderbook.Sell = slices.Delete(orderbook.Sell, idx, idx+1)
+				} else {
+					// update the volume
+					orderbook.Sell[idx].Orders = slices.Delete(orderbook.Sell[idx].Orders, i, i+1)
 				}
+				return nil
 			}
 		}
-	default:
-		panic(fmt.Sprintf("unexpected main.Side: %#v", targetOrder.Side))
 	}
 
 	return ErrCancelOrderFailed

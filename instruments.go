@@ -58,7 +58,7 @@ func cancelOrder(mutex *sync.Mutex, order models.Order) {
 		log.Error("No orderbook was found for ", order.Symbol)
 		return
 	}
-	matchEngine.CancelOrder(orderbook, order)
+	matchEngine.CancelOrder(orderbook, order.ID)
 
 	persistance.CommitOrderBook(*orderbook)
 	mutex.Unlock()

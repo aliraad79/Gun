@@ -56,7 +56,7 @@ go run .
 
 ## Assumptions
 
-- Support for **market orders** must be added.
+- The producer knows the sequence of id and don't send multiple ids
 
 ---
 
