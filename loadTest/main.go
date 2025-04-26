@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"time"
 
+	"fmt"
+
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
@@ -41,13 +43,11 @@ func randomSide() string {
 	}
 }
 
+// var coins = []string{"BTC_USDT", "ETH_USDT", "DOGE_USDT", "ADA_USDT", "BNB_USDT", "TRX_USDT", "XMR_USDT", "FIL_USDT", "FLOKI_USDT", "XAUT_USDT"}
+var coins = []string{"BTC_USDT"}
+
 func randomSymbol() string {
-	rand := rand.Float64()
-	if rand > 0.5 {
-		return "BTC_USDT"
-	} else {
-		return "ETH_USDT"
-	}
+	return coins[rand.Intn(len(coins))]
 }
 
 var (
@@ -68,12 +68,12 @@ func main() {
 		Value:          []byte("{}"),
 	}, nil)
 	log.Println("Start spamming with fake orders")
-	for i := 1; i < 10000; i++ {
+	for i := 1; i < 5000; i++ {
 		order := Order{ID: i, Symbol: randomSymbol(), Side: randomSide(), Price: randomPrice(), Volume: randomVolume(), Type: "limit"}
 		if json_order, err := json.Marshal(order); err == nil {
 			p.Produce(&kafka.Message{
 				TopicPartition: kafka.TopicPartition{Topic: &TOPIC, Partition: kafka.PartitionAny},
-				Key:            []byte("create_" + string(order.ID)),
+				Key:            []byte("create_" + fmt.Sprint(order.ID)),
 				Value:          json_order,
 			}, nil)
 		}
