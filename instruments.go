@@ -24,6 +24,10 @@ type Instrument struct {
 }
 
 func processNewOrder(mutex *sync.Mutex, order models.Order) {
+	if err := models.Validate(order); err != nil {
+		log.Warn("Invalid Order is detected. ", order)
+		return
+	}
 	mutex.Lock()
 
 	orderbook, err := matchEngine.LoadOrFetchOrderbook(order.Symbol)

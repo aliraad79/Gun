@@ -67,3 +67,12 @@ func (order *Order) IsTriggered(price decimal.Decimal) bool {
 		}
 	}
 }
+
+var ErrNotValidOrder error
+
+func Validate(order Order) error {
+	if order.Type == "" || order.Side == "" || order.Price.String() == "" || order.Symbol == "" {
+		return ErrNotValidOrder
+	}
+	return nil
+}
