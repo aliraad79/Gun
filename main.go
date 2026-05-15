@@ -17,6 +17,7 @@ import (
 	"github.com/aliraad79/Gun/metrics"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
+	"github.com/aliraad79/Gun/tracing"
 	"github.com/aliraad79/Gun/utils"
 )
 
@@ -31,6 +32,18 @@ func main() {
 	defer cancel()
 
 	persistance.InitClient()
+
+	// OpenTelemetry tracing. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT is
+	// set, so this is safe to call unconditionally.
+	traceShutdown, err := tracing.Init(ctx)
+	if err != nil {
+		log.Error("tracing init: ", err)
+	}
+	defer func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = traceShutdown(shutCtx)
+		shutCancel()
+	}()
 
 	// Durability is mandatory. Configure via env:
 	//   GUN_JOURNAL_DIR     - directory for per-symbol journals (default ./data/journal)

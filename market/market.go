@@ -19,6 +19,7 @@ import (
 	"github.com/aliraad79/Gun/metrics"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
+	"github.com/aliraad79/Gun/tracing"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -170,6 +171,19 @@ func (m *Market) run(ctx context.Context, wg *sync.WaitGroup) {
 func (m *Market) handle(o op) {
 	start := time.Now()
 	opName := "new"
+
+	// One span per op. The sampler in tracing.Init decides whether to
+	// actually record; either way the cost on the hot path is bounded
+	// (no-op when disabled, ~1 µs when sampled).
+	spanCtx, span := tracing.Start(context.Background(), "market.op",
+		tracing.StringAttr("symbol", m.Symbol),
+		tracing.Int64Attr("order_id", o.order.ID),
+	)
+	_ = spanCtx
+	defer func() {
+		span.SetAttributes(tracing.StringAttr("op", opName))
+		span.End()
+	}()
 
 	switch o.kind {
 	case opNewOrder:
