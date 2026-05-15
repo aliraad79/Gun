@@ -37,6 +37,11 @@ and clearing. It owns *one* concern: matching, fast and correctly.
 | L2 (aggregated-by-price) market-data publishing | ✅ |
 | Strictly-monotonic per-symbol sequence numbers | ✅ |
 | Journal-based crash recovery (mandatory WAL) | ✅ |
+| Prometheus metrics (orders, matches, latency, depth) | ✅ |
+| OpenTelemetry tracing (OTLP, ratio-sampled) | ✅ |
+| Graceful drain on SIGINT / SIGTERM | ✅ |
+| Native fuzz harness over orderbook invariants | ✅ |
+| Replay CLI for incident response | ✅ |
 
 ---
 
@@ -167,8 +172,10 @@ shippable and verified against the same benchmarks.
   (four modes), IOC / FOK / post-only time-in-force, order modify
   (FIFO-preserving qty-down), L2 market-data publishing, per-symbol
   sequence numbers, mandatory journal-based crash recovery.
-- **Phase 4 — Operability.** Prometheus metrics, OpenTelemetry tracing,
-  graceful shutdown, replay tooling, fuzz harness for the matching loop.
+- **Phase 4 — Operability.** *(✅ shipped)* Prometheus metrics on a
+  `/metrics` endpoint, OpenTelemetry OTLP tracing with ratio sampling,
+  graceful drain on signal, a native Go fuzz harness over orderbook
+  invariants, and a `gun-replay` CLI for incident response.
 
 ---
 
@@ -246,6 +253,79 @@ symbol's journal before accepting new orders. Configure via environment:
 Tests and benchmarks that genuinely don't need durability must opt out
 explicitly by passing `&journal.Discard{}` as `Options.Journal` — there
 is no implicit "no-journal" mode in production code.
+
+### Observability
+
+Prometheus metrics are exposed on `:9090/metrics` by default
+(override via `GUN_METRICS_ADDR`, or set it to `""` to disable):
+
+| Metric | Type | Labels | What it tells you |
+|---|---|---|---|
+| `gun_orders_total`              | counter   | `symbol`, `result`  | Submission rate + reject breakdown by reason |
+| `gun_matches_total`             | counter   | `symbol`            | Trade-print rate per market |
+| `gun_op_duration_seconds`       | histogram | `symbol`, `op`      | Engine latency per op type (new / cancel / modify) |
+| `gun_journal_append_duration_seconds` | histogram | —              | Journal write latency, including fsync |
+| `gun_book_levels`               | gauge     | `symbol`, `side`    | Number of price levels per side |
+| `gun_book_orders`               | gauge     | `symbol`, `side`    | Number of resting orders per side |
+| `gun_active_markets`            | gauge     | —                   | Number of Market goroutines currently running |
+
+OpenTelemetry tracing is wired through `tracing.Init`. By default it is
+a no-op; set `OTEL_EXPORTER_OTLP_ENDPOINT` (and optionally
+`GUN_TRACE_SAMPLE_RATIO`, default `0.001`) to ship spans to an OTLP
+collector. Each accepted op produces a `market.op` span tagged with
+`symbol`, `order_id`, and `op` so consumers can drill from a slow trace
+into per-symbol behavior.
+
+A `/healthz` endpoint on the same port returns 200 OK so a load balancer
+or Kubernetes probe has something cheap to call.
+
+### Replay CLI
+
+`cmd/gun-replay` is a small standalone binary that reads a journal
+directory and prints the resulting book state per symbol. Useful for
+crash post-mortems, "what does the book actually look like right now"
+debugging, and migration verification. Reads are independent of writes,
+so it is safe to run against a live journal directory.
+
+```bash
+go build -o gun-replay ./cmd/gun-replay
+./gun-replay -dir ./data/journal                       # all symbols
+./gun-replay -dir ./data/journal -symbol BTC_USDT      # one symbol
+./gun-replay -dir ./data/journal -depth 5 -json        # machine-readable
+```
+
+Sample output:
+
+```
+== BTC_USDT ==
+  ops replayed : 1,284,031
+  next seq     : 2,841,116
+  resting      : buy 1,408 orders @ 213 levels   sell 1,392 orders @ 207 levels
+  spread       : 67431.20000000 / 67432.10000000
+
+  bid price       | qty                  ask price       | qty
+  ----------------+--------------------+-----------------+--------------------
+  67431.20000000  | 3.21000000           67432.10000000  | 2.88000000
+  67431.10000000  | 5.04000000           67432.20000000  | 7.12000000
+  …
+```
+
+### Fuzz harness
+
+A whitebox fuzz target lives in `models/orderbook_fuzz_test.go`. It
+generates random sequences of new / cancel / modify ops and asserts six
+orderbook invariants after every op (ladder sort order, byPrice map
+consistency, orderID-index consistency, no empty ladder levels,
+`totalQty` matches walking sum, no non-positive resting volumes). Run
+it locally for as long as you like:
+
+```bash
+go test ./models -run='^$' -fuzz=FuzzOrderbookInvariants -fuzztime=30s
+```
+
+In one initial run the fuzz caught a real bug (duplicate-orderID
+submission corrupted `orderIndex`); the contract is now documented and
+the fuzz mirrors production producer behavior.
 
 ---
 
@@ -331,28 +411,21 @@ run.
 
 ```
 .
-├── main.go                 # process entry: Kafka consumer + dispatch loop
+├── main.go                 # process entry: Kafka consumer + dispatch + /metrics + graceful drain
 ├── kafka.go                # consumer wiring
 ├── instruments.go          # Kafka command/Instrument types
 ├── messaging.go            # downstream publishing hook
+├── cmd/
+│   └── gun-replay/         # incident-response CLI over the journal
 ├── market/                 # per-symbol Market + Registry (sharded execution)
-│   ├── market.go
-│   ├── registry.go
-│   ├── market_test.go
-│   └── market_journal_test.go
-├── matchEngine/            # matching loop dispatch + benchmarks
-│   ├── matchEngine.go              # limit/market/stop-limit dispatch + TIF + modify
-│   ├── matchEngine_test.go
-│   ├── matchEngine_regression_test.go
-│   ├── matchEngine_tif_test.go
-│   ├── matchEngine_stp_test.go
-│   ├── matchEngine_modify_test.go
-│   ├── matchEngine_seq_test.go
-│   ├── matchEngine_bench_test.go
-│   └── matchEngine_latency_test.go
-├── models/                 # Order / Orderbook / Match / Px / Qty / BookDelta + linked list
+├── matchEngine/            # matching loop dispatch + TIF + STP + modify + bench
+│   ├── matchEngine.go
+│   ├── *_test.go           # unit, regression, tif, stp, modify, seq, bench, latency
+├── models/                 # Order / Orderbook / Match / Px / Qty / BookDelta + linked list + fuzz
 ├── journal/                # mandatory write-ahead log for crash recovery
-├── persistance/            # Redis snapshot (legacy snapshot path)
+├── metrics/                # Prometheus collectors + /metrics handler
+├── tracing/                # OpenTelemetry SDK + OTLP exporter wiring
+├── persistance/            # Redis snapshot (legacy path)
 ├── utils/                  # env helpers, race-safe mutex registry
 ├── bench/                  # baseline benchmark outputs
 └── loadTest/               # end-to-end Kafka load generator
