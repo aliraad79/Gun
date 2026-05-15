@@ -26,7 +26,16 @@ type Registry struct {
 //
 // opts is applied to every Market created by this Registry; in particular,
 // OnMatch / OnBook callbacks defined here are invoked by every market.
+//
+// Journal is REQUIRED. A nil journal means accepted orders are not durable
+// and a crash will silently lose state, which is never what a production
+// caller wants. If you genuinely want to run without durability (tests,
+// benchmarks, throwaway demos), pass &journal.Discard{} explicitly so the
+// intent is visible in the code.
 func NewRegistry(ctx context.Context, wg *sync.WaitGroup, opts Options) *Registry {
+	if opts.Journal == nil {
+		panic("market: Options.Journal is required; pass &journal.Discard{} to opt out of durability explicitly")
+	}
 	return &Registry{
 		ctx:     ctx,
 		wg:      wg,

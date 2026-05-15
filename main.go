@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -10,9 +11,11 @@ import (
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/aliraad79/Gun/journal"
 	"github.com/aliraad79/Gun/market"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
+	"github.com/aliraad79/Gun/utils"
 )
 
 func main() {
@@ -27,12 +30,30 @@ func main() {
 
 	persistance.InitClient()
 
+	// Durability is mandatory. Configure via env:
+	//   GUN_JOURNAL_DIR     - directory for per-symbol journals (default ./data/journal)
+	//   GUN_JOURNAL_FSYNC   - "true" to fsync every append (default "true")
+	journalDir := utils.GetEnvOrDefault("GUN_JOURNAL_DIR", "./data/journal")
+	fsyncOnAppend := true
+	if v := utils.GetEnvOrDefault("GUN_JOURNAL_FSYNC", "true"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			fsyncOnAppend = b
+		}
+	}
+	j, err := journal.NewFileJournal(journalDir, fsyncOnAppend)
+	if err != nil {
+		log.Fatal("could not open journal at ", journalDir, ": ", err)
+	}
+	defer j.Close()
+	log.Warn("journal active at ", journalDir, " (fsync=", fsyncOnAppend, ")")
+
 	var wg sync.WaitGroup
 
 	registry := market.NewRegistry(ctx, &wg, market.Options{
 		InboxSize: 4096,
 		OnMatch:   onMatch,
 		OnBook:    onBook,
+		Journal:   j,
 		Persist:   true,
 	})
 

@@ -13,6 +13,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/aliraad79/Gun/journal"
 	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
@@ -34,14 +35,19 @@ type BookSink func(*models.Orderbook)
 // the matchEngine.Reject* constants.
 type RejectSink func(symbol string, order models.Order, reason string)
 
-// Options configure a Market's behavior. Zero values are sensible defaults.
+// Options configure a Market's behavior. Zero values are sensible defaults
+// for everything except Journal, which is mandatory: leaving it nil is a
+// programmer error because it means accepted orders are NOT durable and a
+// crash will silently lose state. Tests and benchmarks that genuinely don't
+// want durability must opt into that explicitly via journal.Discard{}.
 type Options struct {
 	InboxSize int       // channel buffer; default 1024
 	OnMatch   MatchSink
 	OnBook    BookSink
 	OnReject  RejectSink
-	OnL2      models.L2Sink // Level-2 (aggregated by price) order-book updates
-	Persist   bool          // when true, snapshot to Redis after every op
+	OnL2      models.L2Sink   // Level-2 (aggregated by price) order-book updates
+	Journal   journal.Journal // REQUIRED: write-ahead log for crash recovery
+	Persist   bool            // when true, snapshot to Redis after every op
 }
 
 // inboxDefault is the per-market channel capacity when not overridden.
@@ -85,6 +91,17 @@ func newMarket(symbol string, opts Options) *Market {
 		book = models.NewOrderbook(symbol)
 	}
 
+	// Crash recovery: replay the journal *before* installing the L2
+	// callback so replay does not flood subscribers with synthetic
+	// events. The book ends up in the same state it was at the moment
+	// the last journal record was fsynced.
+	if err := opts.Journal.Replay(symbol, func(rec journal.Record) error {
+		applyJournalRecord(book, rec)
+		return nil
+	}); err != nil {
+		log.Error("journal replay failed for ", symbol, ": ", err)
+	}
+
 	if opts.OnL2 != nil {
 		book.SetL2Sink(opts.OnL2)
 	}
@@ -94,6 +111,21 @@ func newMarket(symbol string, opts Options) *Market {
 		inbox:  make(chan op, opts.InboxSize),
 		book:   book,
 		opts:   opts,
+	}
+}
+
+// applyJournalRecord re-runs one journaled op against the book during
+// crash recovery. Rejected ops are silently re-rejected — the journal
+// includes them by design so that replay is bit-identical to the original
+// processing path.
+func applyJournalRecord(book *models.Orderbook, rec journal.Record) {
+	switch rec.Kind {
+	case journal.RecNew:
+		_ = matchEngine.MatchAndAddNewOrder(book, rec.Order)
+	case journal.RecCancel:
+		_ = matchEngine.CancelOrder(book, rec.OrderID)
+	case journal.RecModify:
+		_ = matchEngine.ModifyOrder(book, rec.OrderID, rec.NewPrice, rec.NewVolume)
 	}
 }
 
@@ -143,6 +175,20 @@ func (m *Market) handle(o op) {
 			}
 			return
 		}
+		// Write-ahead: durably record the op before applying. A crash
+		// between Append and the engine call replays cleanly; a crash
+		// before Append loses the op entirely, which is the correct
+		// behavior (the producer is responsible for retry on timeout).
+		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
+			Kind: journal.RecNew, Order: o.order,
+		}); err != nil {
+			log.Error("journal append failed; dropping order ", o.order.ID, ": ", err)
+			if m.opts.OnReject != nil {
+				m.opts.OnReject(m.Symbol, o.order, "journal_append_failed")
+			}
+			return
+		}
+
 		res := matchEngine.MatchAndAddNewOrder(m.book, o.order)
 		if !res.Accepted {
 			if m.opts.OnReject != nil {
@@ -158,9 +204,24 @@ func (m *Market) handle(o op) {
 				m.opts.OnMatch(m.Symbol, matches)
 			}
 		}
+
 	case opCancel:
+		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
+			Kind: journal.RecCancel, OrderID: o.order.ID, Symbol: m.Symbol,
+		}); err != nil {
+			log.Error("journal append failed; dropping cancel ", o.order.ID, ": ", err)
+			return
+		}
 		_ = matchEngine.CancelOrder(m.book, o.order.ID)
+
 	case opModify:
+		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
+			Kind: journal.RecModify, OrderID: o.order.ID, Symbol: m.Symbol,
+			NewPrice: o.newPrice, NewVolume: o.newVolume,
+		}); err != nil {
+			log.Error("journal append failed; dropping modify ", o.order.ID, ": ", err)
+			return
+		}
 		res := matchEngine.ModifyOrder(m.book, o.order.ID, o.newPrice, o.newVolume)
 		if !res.Accepted {
 			if m.opts.OnReject != nil {

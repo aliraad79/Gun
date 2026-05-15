@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aliraad79/Gun/journal"
 	"github.com/aliraad79/Gun/market"
 	"github.com/aliraad79/Gun/models"
 	"github.com/stretchr/testify/assert"
@@ -21,6 +22,13 @@ func q(v int64) models.Qty { return models.Qty(v * 1_0000_0000) }
 func drainRegistry(t *testing.T, opts market.Options, fn func(*market.Registry)) {
 	t.Helper()
 	t.Setenv("SUPPORTED_SYMBOLS", "BTC_USDT,ETH_USDT,DOGE_USDT")
+
+	// Tests opt out of durability explicitly: a Discard journal makes the
+	// "no recovery" intent visible at the test site rather than hiding it
+	// behind a nil-check default.
+	if opts.Journal == nil {
+		opts.Journal = journal.Discard{}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -133,7 +141,7 @@ func TestMarket_CancelBeforeMatch(t *testing.T) {
 // Concurrent submissions from many producers to the same Registry must
 // not race. Run with go test -race.
 func TestRegistry_ConcurrentProducers(t *testing.T) {
-	opts := market.Options{InboxSize: 1024}
+	opts := market.Options{InboxSize: 1024, Journal: journal.Discard{}}
 
 	t.Setenv("SUPPORTED_SYMBOLS", "BTC_USDT,ETH_USDT")
 	ctx, cancel := context.WithCancel(context.Background())
