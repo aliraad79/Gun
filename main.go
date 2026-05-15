@@ -1,66 +1,79 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/joho/godotenv"
-
+	"github.com/aliraad79/Gun/market"
+	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
-	"github.com/aliraad79/Gun/utils"
 )
 
 func main() {
-	// Load .env file
-	err := godotenv.Load()
-	if err != nil {
+	if err := godotenv.Load(); err != nil {
 		log.Warn("Error loading .env file")
 	}
 
 	log.SetLevel(log.WarnLevel)
 
-	var wg sync.WaitGroup
-	instrumentChan := make(chan Instrument, 1000)
-	wg.Add(1)
-	go startConsumer(&wg, instrumentChan)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	persistance.InitClient()
 
-	var mutexes utils.SymbolMutex
+	var wg sync.WaitGroup
+
+	registry := market.NewRegistry(ctx, &wg, market.Options{
+		InboxSize: 4096,
+		OnMatch:   onMatch,
+		OnBook:    onBook,
+		Persist:   true,
+	})
+
+	instrumentChan := make(chan Instrument, 4096)
+	wg.Add(1)
+	go startConsumer(&wg, instrumentChan)
 
 	log.Info("Starting Match Engine")
 
-	var mu sync.Mutex
-	startTime := time.Now()
-	for i := 0; i < 10; i++ {
-		go func() {
-			for instrument := range instrumentChan {
-				log.Debug("Processed:", instrument)
+	var (
+		startTimeMu sync.Mutex
+		startTime   time.Time
+	)
 
-				switch instrument.Command {
-				case NEW_ORDER_CMD:
-					mutex := mutexes.Get(instrument.Value.Symbol)
-					processNewOrder(mutex, instrument.Value)
-				case CANCEL_ORDER_CMD:
-					mutex := mutexes.Get(instrument.Value.Symbol)
-					cancelOrder(mutex, instrument.Value)
-				case END_LOADTEST_CMD:
-					mu.Lock()
-					log.Warn("Load test ended in ", time.Since(startTime))
-					mu.Unlock()
-				case START_LOADTEST_CMD:
-					mu.Lock()
-					startTime = time.Now()
-					log.Warn("Load test started in ", startTime)
-					mu.Unlock()
-				default:
-					panic(fmt.Sprintf("unexpected main.Command: %#v", instrument.Command))
-				}
-			}
-		}()
+	for inst := range instrumentChan {
+		switch inst.Command {
+		case NEW_ORDER_CMD:
+			registry.Submit(inst.Value)
+		case CANCEL_ORDER_CMD:
+			registry.Cancel(inst.Value)
+		case START_LOADTEST_CMD:
+			startTimeMu.Lock()
+			startTime = time.Now()
+			log.Warn("Load test started at ", startTime)
+			startTimeMu.Unlock()
+		case END_LOADTEST_CMD:
+			startTimeMu.Lock()
+			log.Warn("Load test ended in ", time.Since(startTime),
+				" across ", registry.Count(), " markets")
+			startTimeMu.Unlock()
+		}
 	}
+
+	cancel()
 	wg.Wait()
+}
+
+func onMatch(symbol string, matches []models.Match) {
+	go publishResults(matches)
+}
+
+func onBook(orderbook *models.Orderbook) {
+	publishOrderbook(orderbook)
 }

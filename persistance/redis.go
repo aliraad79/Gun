@@ -24,23 +24,31 @@ func InitClient() {
 	})
 }
 
-func CommitOrderBook(orderbook models.Orderbook) {
+func CommitOrderBook(orderbook *models.Orderbook) {
+	if orderbook == nil || rdb == nil {
+		return
+	}
 	bytesOrderbook, err := proto.Marshal(orderbook.ToProto())
 	if err != nil {
-		log.Error("Can't marshall for ", orderbook, " from persistance memory ", err)
+		log.Error("Can't marshall orderbook for ", orderbook.Symbol, ": ", err)
 		return
 	}
 
 	_, err = rdb.Set(fmt.Sprint("Orderbook_", orderbook.Symbol), bytesOrderbook, 0).Result()
 	if err != nil {
-		log.Error("Can't set value for ", orderbook.Symbol, " to persistance memory ", err)
+		log.Error("Can't set value for ", orderbook.Symbol, " to persistance memory: ", err)
 	}
 }
 
 func LoadOrderbook(symbol string) *models.Orderbook {
+	if rdb == nil {
+		// Persistence is not configured (tests, ephemeral runs). Treat as
+		// "no snapshot" so the caller falls back to a fresh book.
+		return nil
+	}
 	stringOrderbook, err := rdb.Get(fmt.Sprint("Orderbook_", symbol)).Result()
 	if err != nil {
-		log.Error("Can't get value for ", symbol, " from persistance memory", err)
+		log.Debug("Can't get value for ", symbol, " from persistance memory: ", err)
 		return nil
 	}
 
