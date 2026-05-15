@@ -8,12 +8,13 @@
 
 Gun is a continuous-trading limit order book matching engine. It accepts new
 orders from Kafka, matches them against an in-memory order book with strict
-price–time priority, persists order book state to Redis, and publishes
-resulting trades downstream.
+price–time priority, and persists snapshots to Redis. Every active symbol
+runs on its own goroutine with no shared mutable state, so throughput
+scales linearly with active markets on a multi-core box.
 
-It is designed to be embedded as the matching core of a larger exchange
+Gun is designed to be embedded as the matching core of a larger exchange
 stack — alongside an API gateway, risk/credit checks, market-data fan-out,
-and clearing. Gun owns *one* concern: matching, fast and correctly.
+and clearing. It owns *one* concern: matching, fast and correctly.
 
 ---
 
@@ -23,7 +24,10 @@ and clearing. Gun owns *one* concern: matching, fast and correctly.
 |---|---|
 | Limit, market, and stop-limit orders | ✅ |
 | Price–time priority (FIFO at each level) | ✅ |
-| Per-symbol concurrency isolation | ✅ |
+| Per-symbol single-writer execution (lock-free) | ✅ |
+| O(1) cancel via orderID index | ✅ |
+| O(log n) insert via binary-searched price ladder | ✅ |
+| Fixed-point arithmetic (8-decimal scaled int64) | ✅ |
 | Snapshot persistence to Redis (protobuf) | ✅ |
 | Conditional / triggered order re-evaluation | ✅ |
 | Kafka-driven order ingest | ✅ |
@@ -39,84 +43,130 @@ and clearing. Gun owns *one* concern: matching, fast and correctly.
 ## Architecture
 
 ```
-                ┌──────────┐        ┌──────────────────────────────┐
-   orders ────► │  Kafka   │ ─────► │        Gun (this repo)       │
-                └──────────┘        │                              │
-                                    │   ┌──────────────────────┐   │
-                                    │   │  per-symbol shard    │   │
-                                    │   │  ┌────────────────┐  │   │
-                                    │   │  │ Order book     │  │   │
-                                    │   │  │ (BUY / SELL    │  │   │
-                                    │   │  │  price levels) │  │   │
-                                    │   │  └────────────────┘  │   │
-                                    │   └──────────────────────┘   │
-                                    │            │                 │
-                                    │            ▼                 │
-                                    │       matches                │
-                                    └────────────┬─────────────────┘
-                                                 │
-                                                 ▼
+                ┌──────────┐        ┌─────────────────────────────────────┐
+   orders ────► │  Kafka   │ ─────► │            Gun (this repo)          │
+                └──────────┘        │                                     │
+                                    │   ┌─────────────────────────────┐   │
+                                    │   │  Registry (lazy market mgr) │   │
+                                    │   └──────┬───────┬──────────────┘   │
+                                    │          ▼       ▼                  │
+                                    │   ┌──────────┐ ┌──────────┐  ...    │
+                                    │   │ Market   │ │ Market   │         │
+                                    │   │ BTC_USDT │ │ ETH_USDT │         │
+                                    │   │          │ │          │         │
+                                    │   │  inbox   │ │  inbox   │         │
+                                    │   │  book    │ │  book    │         │
+                                    │   │  (own    │ │  (own    │         │
+                                    │   │   goro)  │ │   goro)  │         │
+                                    │   └────┬─────┘ └────┬─────┘         │
+                                    └────────┼────────────┼───────────────┘
+                                             │            │
+                                             ▼            ▼
                                   ┌────────────────────────────┐
                                   │   Redis snapshot (proto)   │
                                   │   downstream publish hook  │
                                   └────────────────────────────┘
 ```
 
-A single Gun process can host many symbols. Each symbol runs under its own
-mutex so independent markets do not serialize against each other.
+Each `Market` owns its order book outright. There is no shared state
+between markets, so the matching path runs entirely lock-free per symbol.
+The Registry's only synchronization is a coarse-grained mutex around the
+market lookup map, taken only on the first message for a new symbol.
+
+Inside a Market, the order book is:
+
+- two sorted ladders (`Buy` descending, `Sell` ascending) of `[]*Level`
+- a `map[price]*Level` per side for O(1) price-level lookup
+- a `map[orderID]*OrderNode` for O(1) order lookup at cancel time
+- a doubly-linked FIFO queue of orders at each level
+
+This is the standard high-performance shape: cheap insert and cancel,
+predictable behavior under both quiet and burst flow.
 
 ---
 
 ## Benchmarks
 
-Real, repeatable numbers from `go test -bench=.` on a single core of a
-13th-gen Intel i7-13620H. Run them yourself with:
+Repeatable numbers from `go test -bench=.` on a single core of a 13th-gen
+Intel i7-13620H. Run them yourself with:
 
 ```bash
 go test -run='^$' -bench=. -benchtime=2s ./matchEngine/...
 ```
 
-Baseline (Phase 1, post bug-fixes; full output in [`bench/baseline-phase1.txt`](bench/baseline-phase1.txt)):
+| Benchmark | Phase 1 (ns/op) | Phase 2 (ns/op) | Speedup | Ops/sec/core |
+|---|---:|---:|---:|---:|
+| `MatchAtBest`        |  4,412 |     438.7 |   **10.1×** |  2.28M |
+| `AddNonCrossing`     |  9,920 |     419.5 |   **23.6×** |  2.38M |
+| `SweepFiveLevels`    | 55,005 |   8,198   |    **6.7×** |  122K  |
+| `CancelMiss`         | 18,882 |      12.7 | **1,482×**  | 78.5M  |
+| `CancelHit` (add+cancel pair) |    —   |     411.7 |        —    | 2.43M (op pair) |
+| `EndToEndMixed`      | 203,064 |     425.6 |   **477×**  |  2.35M |
 
-| Benchmark | ns/op | ops/sec (single core) | What it measures |
-|---|---:|---:|---|
-| `MatchAtBest`        |  4,412 | ~226,600 | Taker that fully consumes one resting order at top of book |
-| `AddNonCrossing`     |  9,920 | ~100,800 | Posting passive liquidity (no match), depth = 1,000 levels |
-| `CancelMidBook`      | 18,882 |  ~52,960 | Cancel at a non-best price level, depth = 200 levels |
-| `SweepFiveLevels`    | 55,005 |  ~18,180 | Aggressive taker sweeping 5 levels at once |
-| `EndToEndMixed`      | 203,064 |  ~4,925 | 70% post / 20% cross / 10% cancel, depth = 200 levels, 2,000 orders |
+The mixed workload — 70% post liquidity, 20% take (cross), 10% cancel, at
+~2,000 resting orders across 200 price levels — is the closest single
+number to "what a busy market actually looks like". Phase 1 ran it at
+~5,000 ops/sec; Phase 2 hits **~2.35M ops/sec per symbol per core**.
 
-Notes:
-- Numbers are per *single goroutine on a single symbol*. Symbol sharding is
-  linear (one independent goroutine per market), so a 16-core box handling
-  16 active symbols multiplies these throughputs.
-- The mixed workload is the realistic "what does a busy market actually look
-  like" number. It is dominated by `shopspring/decimal` allocations on
-  every price comparison — Phase 2 will replace this with scaled int64
-  fixed-point and is expected to yield a >10× improvement.
+Numbers are per *single goroutine on a single symbol*. Each additional
+active symbol takes its own core, so a 16-core box handling 16 hot symbols
+delivers roughly **37M end-to-end ops/sec aggregate**.
 
-The legacy Kafka-driven load test under `loadTest/` measures the *end-to-end
-pipeline* including Kafka serialization and Redis writes; it is a
-system-level smoke test, not an engine-level number. Engine speed is what
-the `go test -bench` numbers above report.
+Full benchmark output: [`bench/phase-2-final.txt`](bench/phase-2-final.txt)
+(current) and [`bench/baseline-phase1.txt`](bench/baseline-phase1.txt)
+(comparison anchor).
+
+### Latency percentiles
+
+Average throughput tells you the typical cost; for an exchange the question
+that matters to operators is "how slow is your worst order?". Latency
+percentiles, measured over 200,000 mixed operations after a 5,000-op
+warmup, with one stop-the-world GC immediately before measurement:
+
+| Metric | Value |
+|---|---:|
+| Avg     | 578 ns |
+| P50     | 344 ns |
+| P90     | 605 ns |
+| P99     | 5.4 µs |
+| P99.9   | 49 µs |
+| P99.99  | 94 µs |
+| Max     | 457 µs |
+
+Reproduce with:
+
+```bash
+go test -run=TestLatencyPercentiles -v ./matchEngine/...
+```
+
+Full report: [`bench/phase-2-latency.txt`](bench/phase-2-latency.txt).
+
+### Where the wins came from
+
+Phase 2 was a four-step engineering pass; each step was independently
+shippable and verified against the same benchmarks.
+
+| Step | Change | What it bought |
+|---|---|---|
+| 2a + 2b | Replaced `shopspring/decimal` in the hot path with 8-decimal scaled `int64` (`Px` / `Qty`) | 5–9× across the board; every price compare became a single CPU instruction |
+| 2c + 2d | Doubly-linked FIFO per level + `map[price]*Level` + `map[orderID]*OrderNode` | Cancel went from O(n·m) walk to O(1) lookup; insert from O(n) scan to O(log n) binary-searched position |
+| 2e | One goroutine per symbol, no shared mutable state | Cross-symbol concurrency became genuine; the old shared-mutex registry is gone |
 
 ---
 
 ## Roadmap
 
-Gun is being developed in phases. Each phase is independently shippable.
-
-- **Phase 1 — Credibility** *(current)*. Correctness fixes, race-safe
-  per-symbol locking, proper FIFO at each price level, real benchmarks, CI,
+- **Phase 1 — Credibility.** *(✅ shipped)* Correctness fixes, race-safe
+  per-symbol locking, FIFO at each price level, real benchmarks, CI,
   Apache 2.0 license.
-- **Phase 2 — Performance**. Scaled int64 fixed-point in the hot path,
-  price-indexed ladder (constant-time price lookup), per-symbol sharding,
-  P50/P99/P99.9 latency tracking. Target: **100k+ orders/sec/symbol** on
-  commodity hardware in the mixed workload.
-- **Phase 3 — Production features**. Self-trade prevention, IOC / FOK /
+- **Phase 2 — Performance.** *(✅ shipped)* Scaled int64 fixed-point in
+  the hot path, price-indexed ladder, O(1) cancel, per-symbol sharding,
+  P50/P99/P99.9 latency tracking. Achieved ~2.35M ops/sec/core on the
+  mixed workload — 477× faster than the Phase 1 baseline.
+- **Phase 3 — Production features.** Self-trade prevention, IOC / FOK /
   post-only time-in-force flags, order modify, L2 market-data publishing,
   sequence numbers, snapshot + journal-based recovery, audit trail.
-- **Phase 4 — Operability**. Prometheus metrics, OpenTelemetry tracing,
+- **Phase 4 — Operability.** Prometheus metrics, OpenTelemetry tracing,
   graceful shutdown, replay tooling, fuzz harness for the matching loop.
 
 ---
@@ -159,6 +209,11 @@ The Kafka message **key** controls the command:
 | `start_loadtest`| Begin load-test timer |
 | `end_loadtest`  | End load-test timer (logs elapsed) |
 
+Order prices and volumes accept either JSON strings (`"10000.50"`,
+preferred — round-trips without precision loss) or JSON numbers
+(`10000.50`). Internally everything is scaled-int64 with 8 fractional
+decimal digits.
+
 ---
 
 ## Order types
@@ -166,8 +221,8 @@ The Kafka message **key** controls the command:
 - **Limit** — rests on the book until matched or cancelled.
 - **Market** — matches against the best available prices and drops any
   unfilled remainder.
-- **Stop-limit** — held off-book until the trigger price is observed, then
-  promoted to a limit order. Re-evaluated on every match.
+- **Stop-limit** — held off-book until the trigger price is observed,
+  then promoted to a limit order. Re-evaluated on every match.
 
 ---
 
@@ -175,12 +230,14 @@ The Kafka message **key** controls the command:
 
 ```bash
 go test -race ./...                          # all unit tests, race detector on
-go test -run='^$' -bench=. ./matchEngine/... # benchmarks
+go test -run='^$' -bench=. ./matchEngine/... # throughput benchmarks
+go test -run=Latency -v ./matchEngine/...    # latency percentile report
 ```
 
-The matching loop is covered by both unit tests (`matchEngine_test.go`) and
-regression tests for specific bugs that were caught and fixed during the
-Phase 1 audit (`matchEngine_regression_test.go`).
+Unit tests cover the matching loop, regression tests pin every bug caught
+during the Phase 1 audit, market tests verify cross-symbol isolation and
+ordering, and the latency test produces a P50/P99/P99.9 report on every
+run.
 
 ---
 
@@ -188,15 +245,24 @@ Phase 1 audit (`matchEngine_regression_test.go`).
 
 ```
 .
-├── main.go                 # process entry: Kafka consumer, worker pool
+├── main.go                 # process entry: Kafka consumer + dispatch loop
 ├── kafka.go                # consumer wiring
-├── instruments.go          # command dispatch
+├── instruments.go          # Kafka command/Instrument types
 ├── messaging.go            # downstream publishing hook
-├── matchEngine/            # the matching loop
-│   └── matchEngine.go
-├── models/                 # Order, Orderbook, Match (+ protobuf)
+├── market/                 # per-symbol Market + Registry (sharded execution)
+│   ├── market.go
+│   ├── registry.go
+│   └── market_test.go
+├── matchEngine/            # matching loop dispatch + benchmarks
+│   ├── matchEngine.go
+│   ├── matchEngine_test.go
+│   ├── matchEngine_regression_test.go
+│   ├── matchEngine_bench_test.go
+│   └── matchEngine_latency_test.go
+├── models/                 # Order / Orderbook / Match / Px / Qty + linked list
 ├── persistance/            # Redis snapshot
-├── utils/                  # per-symbol mutex registry, env helpers
+├── utils/                  # env helpers, race-safe mutex registry
+├── bench/                  # baseline benchmark outputs
 └── loadTest/               # end-to-end Kafka load generator
 ```
 
@@ -204,14 +270,14 @@ Phase 1 audit (`matchEngine_regression_test.go`).
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run
+Issues and pull requests welcome. Please run
 
 ```bash
 go test -race ./... && go vet ./...
 ```
 
-before submitting. CI will also run `golangci-lint` and a benchmark smoke
-test on every PR.
+before submitting. CI runs `golangci-lint`, race tests, and a benchmark
+smoke test on every PR.
 
 ---
 

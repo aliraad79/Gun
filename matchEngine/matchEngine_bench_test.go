@@ -101,23 +101,44 @@ func BenchmarkSweepFiveLevels(b *testing.B) {
 	}
 }
 
-// BenchmarkCancelMidBook measures order cancellation at a non-best price level.
-func BenchmarkCancelMidBook(b *testing.B) {
+// BenchmarkCancelMiss measures the cost of cancelling an order ID that is
+// not (or no longer) on the book. This is the dominant case in many
+// production exchanges: clients race fills with cancels and most cancels
+// arrive after the order has already filled. In Gun it is a single map
+// lookup; in the pre-Phase-2 implementation it was an O(n*m) walk of
+// both sides of the book.
+func BenchmarkCancelMiss(b *testing.B) {
 	mid := int64(10_000)
 	ob := buildBook(2000, 200, mid)
 
-	// pick a real, currently-resting orderID near the middle of the book
-	// for the first iteration. Subsequent iterations will miss (the order
-	// is gone after the first cancel), which is fine — the benchmark also
-	// captures the cost of a "not found" lookup.
-	var targetID int64
-	if len(ob.Buy) > 100 && ob.Buy[100].Orders.Head() != nil {
-		targetID = ob.Buy[100].Orders.Head().Order.ID
+	const missingID int64 = -1 // guaranteed not present
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = matchEngine.CancelOrder(ob, missingID)
+	}
+}
+
+// BenchmarkCancelHit measures the happy-path cancel: add a fresh order to
+// the book then immediately cancel it. This captures the steady-state
+// add+cancel cycle of a market-making client churning orders. The two ops
+// are reported together — divide by 2 for an approximate per-op cost.
+func BenchmarkCancelHit(b *testing.B) {
+	mid := int64(10_000)
+	ob := buildBook(2000, 200, mid)
+
+	// place a fresh order then cancel it, repeatedly. The ID is unique
+	// each iteration so every cancel hits the orderIndex.
+	taker := models.Order{
+		Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
+		Price: p(mid - 1000), Volume: q(1),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = matchEngine.CancelOrder(ob, targetID)
+		taker.ID = int64(i + 1_000_000_000)
+		_ = matchEngine.MatchAndAddNewOrder(ob, taker)
+		_ = matchEngine.CancelOrder(ob, taker.ID)
 	}
 }
 
