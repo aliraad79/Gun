@@ -40,7 +40,8 @@ type Options struct {
 	OnMatch   MatchSink
 	OnBook    BookSink
 	OnReject  RejectSink
-	Persist   bool      // when true, snapshot to Redis after every op
+	OnL2      models.L2Sink // Level-2 (aggregated by price) order-book updates
+	Persist   bool          // when true, snapshot to Redis after every op
 }
 
 // inboxDefault is the per-market channel capacity when not overridden.
@@ -82,6 +83,10 @@ func newMarket(symbol string, opts Options) *Market {
 		// SUPPORTED_SYMBOLS is logged here but not fatal at the market
 		// level (the Registry decides whether to admit the symbol).
 		book = models.NewOrderbook(symbol)
+	}
+
+	if opts.OnL2 != nil {
+		book.SetL2Sink(opts.OnL2)
 	}
 
 	return &Market{
