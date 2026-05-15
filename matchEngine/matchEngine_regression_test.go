@@ -5,7 +5,6 @@ import (
 
 	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/models"
-	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,11 +15,11 @@ func TestLimitMatch_FIFOAtSamePriceLevel(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromInt(100),
+				Price: p(100),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(100)},
-					{ID: 2, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(100)},
-					{ID: 3, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(100)},
+					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(100)},
+					{ID: 2, Volume: q(1), Side: models.SELL, Price: p(100)},
+					{ID: 3, Volume: q(1), Side: models.SELL, Price: p(100)},
 				},
 			},
 		},
@@ -28,7 +27,7 @@ func TestLimitMatch_FIFOAtSamePriceLevel(t *testing.T) {
 
 	taker := models.Order{
 		ID: 99, Type: models.LIMIT, Side: models.BUY,
-		Price: decimal.NewFromInt(100), Volume: decimal.NewFromInt(1),
+		Price: p(100), Volume: q(1),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
@@ -47,9 +46,9 @@ func TestLimitMatch_PartialFillRestsRemainder(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromInt(100),
+				Price: p(100),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromInt(2), Side: models.SELL, Price: decimal.NewFromInt(100)},
+					{ID: 1, Volume: q(2), Side: models.SELL, Price: p(100)},
 				},
 			},
 		},
@@ -57,19 +56,18 @@ func TestLimitMatch_PartialFillRestsRemainder(t *testing.T) {
 
 	taker := models.Order{
 		ID: 99, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
-		Price: decimal.NewFromInt(100), Volume: decimal.NewFromInt(5),
+		Price: p(100), Volume: q(5),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
 
 	assert.Len(t, matches, 1)
-	assert.True(t, matches[0].Volume.Equal(decimal.NewFromInt(2)))
+	assert.Equal(t, q(2), matches[0].Volume)
 	assert.Empty(t, orderbook.Sell, "fully consumed sell level should be removed")
 	if assert.Len(t, orderbook.Buy, 1) {
 		assert.Len(t, orderbook.Buy[0].Orders, 1)
 		got := orderbook.Buy[0].Orders[0].Volume
-		assert.True(t, got.Equal(decimal.NewFromInt(3)),
-			"residual on book must be 3 (5 minus 2 filled), got %s", got.String())
+		assert.Equal(t, q(3), got, "residual on book must be 3 (5 minus 2 filled)")
 	}
 }
 
@@ -80,21 +78,21 @@ func TestLimitMatch_SweepsMultiplePriceLevels(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromInt(100),
+				Price: p(100),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(100)},
+					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(100)},
 				},
 			},
 			{
-				Price: decimal.NewFromInt(101),
+				Price: p(101),
 				Orders: []models.Order{
-					{ID: 2, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(101)},
+					{ID: 2, Volume: q(1), Side: models.SELL, Price: p(101)},
 				},
 			},
 			{
-				Price: decimal.NewFromInt(102),
+				Price: p(102),
 				Orders: []models.Order{
-					{ID: 3, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(102)},
+					{ID: 3, Volume: q(1), Side: models.SELL, Price: p(102)},
 				},
 			},
 		},
@@ -102,7 +100,7 @@ func TestLimitMatch_SweepsMultiplePriceLevels(t *testing.T) {
 
 	taker := models.Order{
 		ID: 99, Type: models.LIMIT, Side: models.BUY,
-		Price: decimal.NewFromInt(101), Volume: decimal.NewFromInt(10),
+		Price: p(101), Volume: q(10),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
@@ -111,22 +109,22 @@ func TestLimitMatch_SweepsMultiplePriceLevels(t *testing.T) {
 	assert.Equal(t, int64(1), matches[0].SellId)
 	assert.Equal(t, int64(2), matches[1].SellId)
 	if assert.Len(t, orderbook.Sell, 1) {
-		assert.True(t, orderbook.Sell[0].Price.Equal(decimal.NewFromInt(102)),
+		assert.Equal(t, p(102), orderbook.Sell[0].Price,
 			"only the 102 level should remain on the sell book")
 	}
 }
 
 // regression for the negative-remainVolume arithmetic: when a single resting
 // order is larger than the taker, the taker should fully fill and remain = 0,
-// never overflow into a negative decimal that could fall through guards.
+// never overflow into a negative value that could fall through guards.
 func TestLimitMatch_TakerFullyFilledByLargerResting(t *testing.T) {
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromInt(100),
+				Price: p(100),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromInt(10), Side: models.SELL, Price: decimal.NewFromInt(100)},
+					{ID: 1, Volume: q(10), Side: models.SELL, Price: p(100)},
 				},
 			},
 		},
@@ -134,17 +132,16 @@ func TestLimitMatch_TakerFullyFilledByLargerResting(t *testing.T) {
 
 	taker := models.Order{
 		ID: 99, Type: models.LIMIT, Side: models.BUY,
-		Price: decimal.NewFromInt(100), Volume: decimal.NewFromInt(3),
+		Price: p(100), Volume: q(3),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
 
 	assert.Len(t, matches, 1)
-	assert.True(t, matches[0].Volume.Equal(decimal.NewFromInt(3)))
+	assert.Equal(t, q(3), matches[0].Volume)
 	if assert.Len(t, orderbook.Sell, 1) && assert.Len(t, orderbook.Sell[0].Orders, 1) {
 		got := orderbook.Sell[0].Orders[0].Volume
-		assert.True(t, got.Equal(decimal.NewFromInt(7)),
-			"resting volume must be 10-3=7, got %s", got.String())
+		assert.Equal(t, q(7), got, "resting volume must be 10-3=7")
 		assert.False(t, got.IsNegative(), "resting volume must never go negative")
 	}
 	assert.Empty(t, orderbook.Buy, "fully filled taker must not rest on the book")
@@ -157,15 +154,15 @@ func TestMarketMatch_SweepsMultiplePriceLevels(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromInt(100),
+				Price: p(100),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(100)},
+					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(100)},
 				},
 			},
 			{
-				Price: decimal.NewFromInt(101),
+				Price: p(101),
 				Orders: []models.Order{
-					{ID: 2, Volume: decimal.NewFromInt(1), Side: models.SELL, Price: decimal.NewFromInt(101)},
+					{ID: 2, Volume: q(1), Side: models.SELL, Price: p(101)},
 				},
 			},
 		},
@@ -173,7 +170,7 @@ func TestMarketMatch_SweepsMultiplePriceLevels(t *testing.T) {
 
 	taker := models.Order{
 		ID: 99, Type: models.MARKET, Side: models.BUY,
-		Volume: decimal.NewFromInt(2),
+		Volume: q(2),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)

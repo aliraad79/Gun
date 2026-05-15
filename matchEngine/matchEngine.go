@@ -1,17 +1,15 @@
 package matchEngine
 
 import (
-	"fmt"
-	"slices"
-
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	. "github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
 	utils "github.com/aliraad79/Gun/utils"
-	"github.com/shopspring/decimal"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -51,19 +49,18 @@ func MatchAndAddNewOrder(orderbook *Orderbook, newOrder Order) []Match {
 // remainder of taker.
 //
 // crosses reports whether the taker's price is willing to trade at the
-// resting price level. For market orders, pass a function that always
-// returns true.
+// resting price level. For market orders, pass alwaysCrosses.
 func matchAgainstBook(
 	book *[]MatchEngineEntry,
 	taker Order,
-	crosses func(takerPrice, restingPrice decimal.Decimal) bool,
-	makeMatch func(taker, resting Order, price, volume decimal.Decimal) Match,
-) ([]Match, decimal.Decimal) {
+	crosses func(takerPrice, restingPrice Px) bool,
+	makeMatch func(taker, resting Order, price Px, volume Qty) Match,
+) ([]Match, Qty) {
 	var matches []Match
 	remain := taker.Volume
 
 	priceIdx := 0
-	for priceIdx < len(*book) && remain.GreaterThan(decimal.Zero) {
+	for priceIdx < len(*book) && remain.IsPositive() {
 		level := (*book)[priceIdx]
 		if !crosses(taker.Price, level.Price) {
 			break
@@ -71,14 +68,14 @@ func matchAgainstBook(
 
 		// price-time priority: oldest order at this level matches first
 		orderIdx := 0
-		for orderIdx < len(level.Orders) && remain.GreaterThan(decimal.Zero) {
+		for orderIdx < len(level.Orders) && remain.IsPositive() {
 			resting := level.Orders[orderIdx]
-			fill := decimal.Min(remain, resting.Volume)
+			fill := MinQty(remain, resting.Volume)
 
 			matches = append(matches, makeMatch(taker, resting, level.Price, fill))
 			remain = remain.Sub(fill)
 
-			if fill.Equal(resting.Volume) {
+			if fill.Eq(resting.Volume) {
 				// resting fully filled; drop it and keep orderIdx where it is
 				level.Orders = slices.Delete(level.Orders, orderIdx, orderIdx+1)
 			} else {
@@ -100,27 +97,21 @@ func matchAgainstBook(
 	return matches, remain
 }
 
-func buyCrosses(takerPrice, restingPrice decimal.Decimal) bool {
-	return takerPrice.GreaterThanOrEqual(restingPrice)
-}
+func buyCrosses(takerPrice, restingPrice Px) bool  { return takerPrice.Gte(restingPrice) }
+func sellCrosses(takerPrice, restingPrice Px) bool { return takerPrice.Lte(restingPrice) }
+func alwaysCrosses(_, _ Px) bool                   { return true }
 
-func sellCrosses(takerPrice, restingPrice decimal.Decimal) bool {
-	return takerPrice.LessThanOrEqual(restingPrice)
-}
-
-func alwaysCrosses(_, _ decimal.Decimal) bool { return true }
-
-func makeBuyMatch(taker, resting Order, price, volume decimal.Decimal) Match {
+func makeBuyMatch(taker, resting Order, price Px, volume Qty) Match {
 	return Match{BuyId: taker.ID, SellId: resting.ID, Price: price, Volume: volume}
 }
 
-func makeSellMatch(taker, resting Order, price, volume decimal.Decimal) Match {
+func makeSellMatch(taker, resting Order, price Px, volume Qty) Match {
 	return Match{BuyId: resting.ID, SellId: taker.ID, Price: price, Volume: volume}
 }
 
 func handleLimitOrder(orderbook *Orderbook, newOrder Order) []Match {
 	var matches []Match
-	var remain decimal.Decimal
+	var remain Qty
 
 	switch newOrder.Side {
 	case BUY:
@@ -132,7 +123,7 @@ func handleLimitOrder(orderbook *Orderbook, newOrder Order) []Match {
 		return nil
 	}
 
-	if remain.GreaterThan(decimal.Zero) {
+	if remain.IsPositive() {
 		newOrder.Volume = remain
 		orderbook.Add(newOrder)
 	}
@@ -142,7 +133,7 @@ func handleLimitOrder(orderbook *Orderbook, newOrder Order) []Match {
 
 func handleMarketOrder(orderbook *Orderbook, newOrder Order) []Match {
 	var matches []Match
-	var remain decimal.Decimal
+	var remain Qty
 
 	switch newOrder.Side {
 	case BUY:
@@ -154,7 +145,7 @@ func handleMarketOrder(orderbook *Orderbook, newOrder Order) []Match {
 		return nil
 	}
 
-	if remain.GreaterThan(decimal.Zero) {
+	if remain.IsPositive() {
 		log.Warn("unfilled market order; remainder dropped: ", newOrder)
 	}
 
@@ -162,9 +153,8 @@ func handleMarketOrder(orderbook *Orderbook, newOrder Order) []Match {
 }
 
 func handleStopLimitOrder(orderbook *Orderbook, order Order) []Match {
-	//todo: Must get this from some memory
-	lastPrice := decimal.Zero
-	if order.IsTriggered(lastPrice) {
+	// TODO: source the reference price from the last-trade tracker.
+	if order.IsTriggered(ZeroPx) {
 		return handleLimitOrder(orderbook, order)
 	}
 	orderbook.AddConditionalOrder(order)
@@ -173,15 +163,15 @@ func handleStopLimitOrder(orderbook *Orderbook, order Order) []Match {
 
 var ErrCancelOrderFailed = errors.New("cancelling order failed")
 
+// CancelOrder removes the order with id targetOrderId from the book.
+// O(n*m) today; Phase 2c replaces this with an O(1) orderID index.
 func CancelOrder(orderbook *Orderbook, targetOrderId int64) error {
 	for idx, matchEngineEntry := range orderbook.Buy {
 		for i, order := range matchEngineEntry.Orders {
 			if order.ID == targetOrderId {
 				if len(matchEngineEntry.Orders) == 1 {
-					// remove the entry if it get emptied
 					orderbook.Buy = slices.Delete(orderbook.Buy, idx, idx+1)
 				} else {
-					// update the volume
 					orderbook.Buy[idx].Orders = slices.Delete(orderbook.Buy[idx].Orders, i, i+1)
 				}
 				return nil
@@ -192,10 +182,8 @@ func CancelOrder(orderbook *Orderbook, targetOrderId int64) error {
 		for i, order := range matchEngineEntry.Orders {
 			if order.ID == targetOrderId {
 				if len(matchEngineEntry.Orders) == 1 {
-					// remove the entry if it get emptied
 					orderbook.Sell = slices.Delete(orderbook.Sell, idx, idx+1)
 				} else {
-					// update the volume
 					orderbook.Sell[idx].Orders = slices.Delete(orderbook.Sell[idx].Orders, i, i+1)
 				}
 				return nil
@@ -209,8 +197,8 @@ func CancelOrder(orderbook *Orderbook, targetOrderId int64) error {
 var ErrNotValidSymbol = errors.New("item not found")
 
 func createOrderbook(symbol string) (*Orderbook, error) {
-	supported_symbols := os.Getenv("SUPPORTED_SYMBOLS")
-	symbols := strings.Split(supported_symbols, ",")
+	supportedSymbols := os.Getenv("SUPPORTED_SYMBOLS")
+	symbols := strings.Split(supportedSymbols, ",")
 
 	if utils.Contains(symbols, symbol) {
 		return &Orderbook{Symbol: symbol}, nil

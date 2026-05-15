@@ -1,14 +1,12 @@
 package models
 
 import (
-	"github.com/shopspring/decimal"
-
 	protoModels "github.com/aliraad79/Gun/models/models"
 	log "github.com/sirupsen/logrus"
 )
 
 type MatchEngineEntry struct {
-	Price  decimal.Decimal
+	Price  Px
 	Orders []Order
 }
 
@@ -19,45 +17,45 @@ type Orderbook struct {
 	Symbol            string
 }
 
+// Add places an order on its side of the book at the correct price level.
+// Buy levels are stored in descending price order (best bid first); sell
+// levels are stored in ascending price order (best ask first). Orders at
+// the same level are appended in arrival order (FIFO head -> tail).
+//
+// Today this is an O(n) linear walk; Phase 2d replaces it with a
+// binary-searched insert plus an O(1) level-by-price map.
 func (orderbook *Orderbook) Add(order Order) {
 	switch order.Side {
 	case BUY:
-		{
-			lastPrice := decimal.RequireFromString("100000000000000")
-			for idx, entry := range orderbook.Buy {
-				if entry.Price.LessThan(order.Price) && order.Price.LessThan(lastPrice) {
-					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-					orderbook.Buy = append(orderbook.Buy[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Buy[idx:]...)...)
-					return
-				} else if entry.Price == order.Price {
-					orderbook.Buy[idx].Orders = append(entry.Orders, order)
-					return
-				}
-				lastPrice = entry.Price
+		for idx, entry := range orderbook.Buy {
+			if order.Price.Gt(entry.Price) {
+				newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+				orderbook.Buy = append(orderbook.Buy[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Buy[idx:]...)...)
+				return
 			}
-			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-			orderbook.Buy = append(orderbook.Buy, newEntry)
+			if order.Price.Eq(entry.Price) {
+				orderbook.Buy[idx].Orders = append(entry.Orders, order)
+				return
+			}
 		}
-	case SELL:
-		{
-			lastPrice := decimal.Zero
-			for idx, entry := range orderbook.Sell {
-				if entry.Price.GreaterThan(order.Price) && order.Price.GreaterThan(lastPrice) {
-					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-					orderbook.Sell = append(orderbook.Sell[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Sell[idx:]...)...)
-					return
-				} else if entry.Price == order.Price {
-					orderbook.Sell[idx].Orders = append(entry.Orders, order)
-					return
-				}
-				lastPrice = entry.Price
-			}
+		orderbook.Buy = append(orderbook.Buy, MatchEngineEntry{Orders: []Order{order}, Price: order.Price})
 
-			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-			orderbook.Sell = append(orderbook.Sell, newEntry)
+	case SELL:
+		for idx, entry := range orderbook.Sell {
+			if order.Price.Lt(entry.Price) {
+				newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
+				orderbook.Sell = append(orderbook.Sell[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Sell[idx:]...)...)
+				return
+			}
+			if order.Price.Eq(entry.Price) {
+				orderbook.Sell[idx].Orders = append(entry.Orders, order)
+				return
+			}
 		}
+		orderbook.Sell = append(orderbook.Sell, MatchEngineEntry{Orders: []Order{order}, Price: order.Price})
+
 	default:
-		log.Error("unexpected main.Side: ", order.Side)
+		log.Error("unexpected order.Side: ", order.Side)
 	}
 }
 

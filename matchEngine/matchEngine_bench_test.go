@@ -6,12 +6,10 @@ import (
 
 	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/models"
-	"github.com/shopspring/decimal"
 )
 
 // buildBook seeds a book with depthPerSide orders on each side, spread across
-// numLevels price levels symmetric around midPrice. Returns a fresh orderbook
-// ready for benchmarking.
+// numLevels price levels symmetric around midPrice (in whole units).
 func buildBook(depthPerSide, numLevels int, midPrice int64) *models.Orderbook {
 	ob := &models.Orderbook{Symbol: "BTC_USDT"}
 	r := rand.New(rand.NewPCG(1, 2))
@@ -23,11 +21,12 @@ func buildBook(depthPerSide, numLevels int, midPrice int64) *models.Orderbook {
 	}
 
 	for lvl := 1; lvl <= numLevels; lvl++ {
-		buyPrice := decimal.NewFromInt(midPrice - int64(lvl))
-		sellPrice := decimal.NewFromInt(midPrice + int64(lvl))
+		buyPrice := p(midPrice - int64(lvl))
+		sellPrice := p(midPrice + int64(lvl))
 
 		for i := 0; i < ordersPerLevel; i++ {
-			vol := decimal.NewFromFloat(1 + r.Float64())
+			// volume ∈ [1, 2) whole units, with 8-decimal fractional jitter
+			vol := models.Qty(int64(1_0000_0000) + r.Int64N(1_0000_0000))
 
 			ob.Add(models.Order{
 				ID: nextID, Symbol: "BTC_USDT", Type: models.LIMIT,
@@ -53,8 +52,8 @@ func BenchmarkAddNonCrossing(b *testing.B) {
 
 	taker := models.Order{
 		ID: 0, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
-		Price:  decimal.NewFromInt(mid - 2000), // far below best bid
-		Volume: decimal.NewFromInt(1),
+		Price:  p(mid - 2000), // far below best bid
+		Volume: q(1),
 	}
 
 	b.ResetTimer()
@@ -75,7 +74,7 @@ func BenchmarkMatchAtBest(b *testing.B) {
 		ob := buildBook(100, 10, mid)
 		taker := models.Order{
 			ID: int64(i + 1_000_000), Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
-			Price: decimal.NewFromInt(mid + 1), Volume: decimal.NewFromFloat(0.1),
+			Price: p(mid + 1), Volume: models.Qty(1000_0000), // 0.1
 		}
 		b.StartTimer()
 
@@ -94,7 +93,7 @@ func BenchmarkSweepFiveLevels(b *testing.B) {
 		ob := buildBook(500, 10, mid)
 		taker := models.Order{
 			ID: int64(i + 1_000_000), Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
-			Price: decimal.NewFromInt(mid + 5), Volume: decimal.NewFromInt(100),
+			Price: p(mid + 5), Volume: q(100),
 		}
 		b.StartTimer()
 
@@ -103,13 +102,10 @@ func BenchmarkSweepFiveLevels(b *testing.B) {
 }
 
 // BenchmarkCancelMidBook measures order cancellation at a non-best price level.
-// Worst case for the current O(n*m) cancel: target sits in the middle of the
-// book.
 func BenchmarkCancelMidBook(b *testing.B) {
 	mid := int64(10_000)
 	ob := buildBook(2000, 200, mid)
 
-	// Pick an order that exists somewhere in the middle of the book.
 	var targetID int64
 	if len(ob.Buy) > 100 && len(ob.Buy[100].Orders) > 0 {
 		targetID = ob.Buy[100].Orders[0].ID
@@ -117,7 +113,7 @@ func BenchmarkCancelMidBook(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = matchEngine.CancelOrder(ob, targetID) // most iterations will miss after first
+		_ = matchEngine.CancelOrder(ob, targetID)
 	}
 }
 
@@ -143,22 +139,24 @@ func BenchmarkEndToEndMixed(b *testing.B) {
 		switch {
 		case roll < 0.70: // post liquidity away from best
 			offset := int64(2 + r.IntN(50))
-			price := mid - offset
+			price := p(mid - offset)
 			if side == models.SELL {
-				price = mid + offset
+				price = p(mid + offset)
 			}
+			vol := models.Qty(5000_0000 + r.Int64N(1_0000_0000)) // ~0.5–1.5
 			_ = matchEngine.MatchAndAddNewOrder(ob, models.Order{
 				ID: nextID, Symbol: "BTC_USDT", Type: models.LIMIT, Side: side,
-				Price: decimal.NewFromInt(price), Volume: decimal.NewFromFloat(0.5 + r.Float64()),
+				Price: price, Volume: vol,
 			})
 		case roll < 0.90: // taker that crosses
-			price := mid + 5
+			price := p(mid + 5)
 			if side == models.SELL {
-				price = mid - 5
+				price = p(mid - 5)
 			}
+			vol := models.Qty(5000_0000 + r.Int64N(1_0000_0000))
 			_ = matchEngine.MatchAndAddNewOrder(ob, models.Order{
 				ID: nextID, Symbol: "BTC_USDT", Type: models.LIMIT, Side: side,
-				Price: decimal.NewFromInt(price), Volume: decimal.NewFromFloat(0.5 + r.Float64()),
+				Price: price, Volume: vol,
 			})
 		default: // cancel a random resting order if any exist
 			book := ob.Buy

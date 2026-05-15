@@ -5,155 +5,144 @@ import (
 
 	"github.com/aliraad79/Gun/matchEngine"
 	"github.com/aliraad79/Gun/models"
-	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 )
 
+// p builds a Px from a whole-number int (e.g., p(10000) = 10000.00000000).
+func p(v int64) models.Px { return models.Px(v * 1_0000_0000) }
+
+// q builds a Qty from a whole-number int.
+func q(v int64) models.Qty { return models.Qty(v * 1_0000_0000) }
+
 func TestMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.SELL, Price: decimal.NewFromInt(10000)},
+					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(10000)},
 				},
 			},
 		},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     2,
 		Type:   models.LIMIT,
 		Side:   models.BUY,
-		Volume: decimal.NewFromFloat(1),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(1),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(2), matches[0].BuyId)
 	assert.Equal(t, int64(1), matches[0].SellId)
-	assert.Equal(t, decimal.NewFromFloat(10000), matches[0].Price)
-	assert.Equal(t, decimal.NewFromFloat(1), matches[0].Volume)
+	assert.Equal(t, p(10000), matches[0].Price)
+	assert.Equal(t, q(1), matches[0].Volume)
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
 }
 
 func TestMultipleMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.SELL, Price: decimal.NewFromInt(10000)},
-					{ID: 2, Volume: decimal.NewFromFloat(1), Side: models.SELL, Price: decimal.NewFromInt(10000)},
-					{ID: 3, Volume: decimal.NewFromFloat(1), Side: models.SELL, Price: decimal.NewFromInt(10000)},
+					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(10000)},
+					{ID: 2, Volume: q(1), Side: models.SELL, Price: p(10000)},
+					{ID: 3, Volume: q(1), Side: models.SELL, Price: p(10000)},
 				},
 			},
 		},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     4,
 		Symbol: "BTC_USDT",
 		Type:   models.LIMIT,
 		Side:   models.BUY,
-		Volume: decimal.NewFromFloat(3),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(3),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 3)
 	for _, match := range matches {
-		assert.Equal(t, decimal.NewFromFloat(10000), match.Price)
-		assert.Equal(t, decimal.NewFromFloat(1), match.Volume)
+		assert.Equal(t, p(10000), match.Price)
+		assert.Equal(t, q(1), match.Volume)
 	}
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
 }
 
 func TestMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Buy: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.BUY, Price: decimal.NewFromInt(10000)},
+					{ID: 1, Volume: q(1), Side: models.BUY, Price: p(10000)},
 				},
 			},
 		},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     2,
 		Type:   models.LIMIT,
 		Side:   models.SELL,
-		Volume: decimal.NewFromFloat(1),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(1),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].BuyId)
 	assert.Equal(t, int64(2), matches[0].SellId)
-	assert.Equal(t, decimal.NewFromFloat(10000), matches[0].Price)
-	assert.Equal(t, decimal.NewFromFloat(1), matches[0].Volume)
+	assert.Equal(t, p(10000), matches[0].Price)
+	assert.Equal(t, q(1), matches[0].Volume)
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
 }
 
 func TestMultipleMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Buy: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.BUY, Price: decimal.NewFromInt(10000)},
-					{ID: 2, Volume: decimal.NewFromFloat(1), Side: models.BUY, Price: decimal.NewFromInt(10000)},
-					{ID: 3, Volume: decimal.NewFromFloat(1), Side: models.BUY, Price: decimal.NewFromInt(10000)},
+					{ID: 1, Volume: q(1), Side: models.BUY, Price: p(10000)},
+					{ID: 2, Volume: q(1), Side: models.BUY, Price: p(10000)},
+					{ID: 3, Volume: q(1), Side: models.BUY, Price: p(10000)},
 				},
 			},
 		},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     4,
 		Symbol: "BTC_USDT",
 		Type:   models.LIMIT,
 		Side:   models.SELL,
-		Volume: decimal.NewFromFloat(3),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(3),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 3)
 	for _, match := range matches {
-		assert.Equal(t, decimal.NewFromFloat(10000), match.Price)
-		assert.Equal(t, decimal.NewFromFloat(1), match.Volume)
+		assert.Equal(t, p(10000), match.Price)
+		assert.Equal(t, q(1), match.Volume)
 	}
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
@@ -164,17 +153,15 @@ func TestCancelOrder_Success(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Buy: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.BUY},
+					{ID: 1, Volume: q(1), Side: models.BUY},
 				},
 			},
 		},
 	}
 
-	targetOrderId := int64(1)
-
-	err := matchEngine.CancelOrder(orderbook, targetOrderId)
+	err := matchEngine.CancelOrder(orderbook, 1)
 
 	assert.NoError(t, err)
 	assert.Empty(t, orderbook.Buy)
@@ -185,39 +172,35 @@ func TestCancelInvalidOrder_Success(t *testing.T) {
 		Symbol: "BTC_USDT",
 		Buy: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
-					{ID: 1, Volume: decimal.NewFromFloat(1), Side: models.BUY},
+					{ID: 1, Volume: q(1), Side: models.BUY},
 				},
 			},
 		},
 	}
 
-	targetOrderId := int64(2)
-
-	err := matchEngine.CancelOrder(orderbook, targetOrderId)
+	err := matchEngine.CancelOrder(orderbook, 2)
 
 	assert.Error(t, err, matchEngine.ErrCancelOrderFailed)
-	assert.Equal(t, len(orderbook.Buy), 1)
-	assert.Equal(t, len(orderbook.Buy[0].Orders), 1)
+	assert.Equal(t, 1, len(orderbook.Buy))
+	assert.Equal(t, 1, len(orderbook.Buy[0].Orders))
 }
 
 func TestMatchAndAddNewOrder_sellMarketOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Buy: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
 					{
-						ID:           1,
-						Volume:       decimal.NewFromFloat(1),
-						Side:         models.BUY,
-						Price:        decimal.NewFromInt(10000),
-						Type:         models.LIMIT,
-						Symbol:       "BTC_USDT",
-						TriggerPrice: decimal.Decimal{},
+						ID:     1,
+						Volume: q(1),
+						Side:   models.BUY,
+						Price:  p(10000),
+						Type:   models.LIMIT,
+						Symbol: "BTC_USDT",
 					},
 				},
 			},
@@ -226,70 +209,62 @@ func TestMatchAndAddNewOrder_sellMarketOrder(t *testing.T) {
 		ConditionalOrders: []models.Order{},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     2,
 		Type:   models.MARKET,
 		Side:   models.SELL,
-		Volume: decimal.NewFromFloat(1),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(1),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].BuyId)
 	assert.Equal(t, int64(2), matches[0].SellId)
-	assert.Equal(t, decimal.NewFromFloat(10000), matches[0].Price)
-	assert.Equal(t, decimal.NewFromFloat(1), matches[0].Volume)
+	assert.Equal(t, p(10000), matches[0].Price)
+	assert.Equal(t, q(1), matches[0].Volume)
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
 }
 
 func TestMatchAndAddNewOrder_buyMarketOrder(t *testing.T) {
-	// Setup a simple orderbook
 	orderbook := &models.Orderbook{
 		Symbol: "BTC_USDT",
 		Sell: []models.MatchEngineEntry{
 			{
-				Price: decimal.NewFromFloat(10000),
+				Price: p(10000),
 				Orders: []models.Order{
 					{
-						ID:           1,
-						Volume:       decimal.NewFromFloat(1),
-						Side:         models.SELL,
-						Price:        decimal.NewFromInt(10000),
-						Type:         models.LIMIT,
-						Symbol:       "BTC_USDT",
-						TriggerPrice: decimal.Decimal{},
+						ID:     1,
+						Volume: q(1),
+						Side:   models.SELL,
+						Price:  p(10000),
+						Type:   models.LIMIT,
+						Symbol: "BTC_USDT",
 					},
 				},
 			},
 		},
-		Buy:              []models.MatchEngineEntry{},
+		Buy:               []models.MatchEngineEntry{},
 		ConditionalOrders: []models.Order{},
 	}
 
-	// Create a new buy limit order
 	newOrder := models.Order{
 		ID:     2,
 		Type:   models.MARKET,
 		Side:   models.BUY,
-		Volume: decimal.NewFromFloat(1),
-		Price:  decimal.NewFromFloat(10000),
+		Volume: q(1),
+		Price:  p(10000),
 	}
 
-	// Act
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
 
-	// Assert
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].SellId)
 	assert.Equal(t, int64(2), matches[0].BuyId)
-	assert.Equal(t, decimal.NewFromFloat(10000), matches[0].Price)
-	assert.Equal(t, decimal.NewFromFloat(1), matches[0].Volume)
+	assert.Equal(t, p(10000), matches[0].Price)
+	assert.Equal(t, q(1), matches[0].Volume)
 	assert.Empty(t, orderbook.Sell)
 	assert.Empty(t, orderbook.Buy)
 }
