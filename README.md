@@ -459,16 +459,32 @@ run.
 
 ---
 
-## Contributing
+## If you read this far
 
-Issues and pull requests welcome. Please run
+Two small asks, both genuine:
+
+- **Star the repo** if the architecture or the benchmarks were interesting
+  to you. It's the cheapest signal that this is the kind of thing the
+  community wants more of, and it nudges the next reader.
+- **Open a PR if you find a real bug** — something where the order book
+  lands in a broken state, a benchmark claims a number that doesn't
+  reproduce on your hardware, the documentation walks you off a cliff,
+  or a test passes that shouldn't. I audited my own code and found
+  [5 bugs](https://github.com/aliraad79/Gun); I would much rather you
+  find the next one as a PR than someone finding it in production.
+
+For design conversations and "have you considered X" — open an issue
+instead. Drive-by PRs that reshape a working subsystem land badly; issues
+that propose the reshape first land well. I read everything and respond
+to everything.
+
+Before submitting code:
 
 ```bash
 go test -race ./... && go vet ./...
 ```
 
-before submitting. CI runs `golangci-lint`, race tests, and a benchmark
-smoke test on every PR.
+CI runs `golangci-lint`, race tests, and a benchmark smoke test on every PR.
 
 ---
 
