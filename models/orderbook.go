@@ -202,6 +202,10 @@ func (ob *Orderbook) removeFrontLevel(side Side) {
 // alwaysCross=true bypasses the price-crossing check and is used for
 // market orders.
 //
+// Self-trade prevention: when the taker carries a non-zero UserID and a
+// non-empty STP mode, resting orders owned by the same user are handled
+// per the taker's STP setting instead of producing a real trade match.
+//
 // Returns the produced matches and the unfilled remainder of taker.
 func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
 	ob.ensureMaps()
@@ -215,6 +219,8 @@ func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
 	default:
 		return nil, taker.Volume
 	}
+
+	stpEnabled := taker.UserID != 0 && taker.STP != STPNone
 
 	var matches []Match
 	remain := taker.Volume
@@ -235,6 +241,16 @@ func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
 				break
 			}
 			resting := node.Order
+
+			// Self-trade prevention: if same UserID, apply STP mode.
+			if stpEnabled && resting.UserID == taker.UserID {
+				done := ob.applySTP(taker.STP, &remain, node, level)
+				if done {
+					break
+				}
+				continue
+			}
+
 			fill := MinQty(remain, resting.Volume)
 
 			matches = append(matches, makeMatch(taker, resting, level.Price, fill))
@@ -254,6 +270,53 @@ func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
 	}
 
 	return matches, remain
+}
+
+// applySTP handles a same-user crossing per the taker's STP mode. It
+// mutates the book (and remain) directly and returns done=true when the
+// taker should stop matching entirely.
+func (ob *Orderbook) applySTP(mode STPMode, remain *Qty, node *OrderNode, level *MatchEngineEntry) (done bool) {
+	resting := node.Order
+	switch mode {
+	case STPCancelTaker:
+		// Halt matching; the resting order stays untouched and the
+		// taker's remainder is dropped.
+		*remain = ZeroQty
+		return true
+
+	case STPCancelResting:
+		// Remove the resting order and continue with the next.
+		level.Orders.Remove(node)
+		delete(ob.orderIndex, resting.ID)
+		return false
+
+	case STPCancelBoth:
+		level.Orders.Remove(node)
+		delete(ob.orderIndex, resting.ID)
+		*remain = ZeroQty
+		return true
+
+	case STPDecrement:
+		// Net-out: both sides reduce by the smaller quantity. No trade
+		// is reported (this is not a real match, just a cancellation
+		// in disguise).
+		fill := MinQty(*remain, resting.Volume)
+		*remain = remain.Sub(fill)
+		if fill.Eq(resting.Volume) {
+			level.Orders.Remove(node)
+			delete(ob.orderIndex, resting.ID)
+		} else {
+			node.Order.Volume = resting.Volume.Sub(fill)
+		}
+		return false
+
+	default:
+		// Unknown STP mode -> treat as cancel-taker. Erring on the side
+		// of "never let a same-user trade through" is the safer default
+		// for a regulated venue.
+		*remain = ZeroQty
+		return true
+	}
 }
 
 // frontLevel returns the best-priced level on the given side, or nil if
