@@ -49,6 +49,13 @@ func (r *Registry) Cancel(order models.Order) {
 	m.Cancel(order.ID)
 }
 
+// Modify routes an order modification to the right market. See
+// matchEngine.ModifyOrder for price/quantity semantics.
+func (r *Registry) Modify(symbol string, orderID int64, newPrice models.Px, newVolume models.Qty) {
+	m := r.getOrCreate(symbol)
+	m.Modify(orderID, newPrice, newVolume)
+}
+
 // Get returns the existing market for a symbol, creating it if necessary.
 // Exposed for tests that want to introspect a market.
 func (r *Registry) Get(symbol string) *Market {

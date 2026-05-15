@@ -51,11 +51,14 @@ type opKind uint8
 const (
 	opNewOrder opKind = iota
 	opCancel
+	opModify
 )
 
 type op struct {
-	kind  opKind
-	order models.Order // for opNewOrder; for opCancel only order.ID is read
+	kind      opKind
+	order     models.Order // for opNewOrder; for opCancel only order.ID is read
+	newPrice  models.Px    // for opModify
+	newVolume models.Qty   // for opModify
 }
 
 // Market owns a single-symbol Orderbook and processes orders from its
@@ -100,6 +103,17 @@ func (m *Market) Cancel(id int64) {
 	m.inbox <- op{kind: opCancel, order: models.Order{ID: id}}
 }
 
+// Modify enqueues a modify-order op. See matchEngine.ModifyOrder for
+// the price/quantity semantics.
+func (m *Market) Modify(orderID int64, newPrice models.Px, newVolume models.Qty) {
+	m.inbox <- op{
+		kind:      opModify,
+		order:     models.Order{ID: orderID},
+		newPrice:  newPrice,
+		newVolume: newVolume,
+	}
+}
+
 // run is the single-writer loop. Stops when ctx is cancelled and the inbox
 // is drained.
 func (m *Market) run(ctx context.Context, wg *sync.WaitGroup) {
@@ -141,6 +155,17 @@ func (m *Market) handle(o op) {
 		}
 	case opCancel:
 		_ = matchEngine.CancelOrder(m.book, o.order.ID)
+	case opModify:
+		res := matchEngine.ModifyOrder(m.book, o.order.ID, o.newPrice, o.newVolume)
+		if !res.Accepted {
+			if m.opts.OnReject != nil {
+				m.opts.OnReject(m.Symbol, o.order, res.Reason)
+			}
+			break
+		}
+		if len(res.Matches) > 0 && m.opts.OnMatch != nil {
+			m.opts.OnMatch(m.Symbol, res.Matches)
+		}
 	}
 
 	if m.opts.Persist {

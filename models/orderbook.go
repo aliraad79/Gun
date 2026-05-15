@@ -146,6 +146,45 @@ func (ob *Orderbook) SetSeq(s uint64) { ob.seq = s }
 // ErrCancelOrderFailed is returned by Cancel when the order ID is unknown.
 var ErrCancelOrderFailed = errors.New("cancelling order failed")
 
+// ErrModifyIncrease is returned by ReduceVolume when the new volume is
+// not strictly smaller than the current resting volume.
+var ErrModifyIncrease = errors.New("reduce: new volume must be smaller than resting")
+
+// LookupOrder returns the resting order with the given ID, or false if
+// no such order is resting. The returned Order is a copy; mutating it
+// has no effect on the book.
+func (ob *Orderbook) LookupOrder(orderID int64) (Order, bool) {
+	ob.ensureMaps()
+	n, ok := ob.orderIndex[orderID]
+	if !ok {
+		return Order{}, false
+	}
+	return n.Order, true
+}
+
+// ReduceVolume shrinks a resting order's quantity in place, preserving
+// its FIFO queue position at the level. Returns ErrCancelOrderFailed if
+// the order is not on the book; ErrModifyIncrease if the new volume is
+// not strictly smaller than the current resting volume.
+//
+// A new volume of zero is equivalent to a cancel and is delegated to
+// Cancel.
+func (ob *Orderbook) ReduceVolume(orderID int64, newVolume Qty) error {
+	ob.ensureMaps()
+	if newVolume.IsZero() {
+		return ob.Cancel(orderID)
+	}
+	n, ok := ob.orderIndex[orderID]
+	if !ok {
+		return ErrCancelOrderFailed
+	}
+	if !newVolume.Lt(n.Order.Volume) {
+		return ErrModifyIncrease
+	}
+	n.Order.Volume = newVolume
+	return nil
+}
+
 // Cancel removes the order with id targetID from the book. O(1) order
 // lookup via the orderID index; O(log n) on level removal if the level
 // empties.

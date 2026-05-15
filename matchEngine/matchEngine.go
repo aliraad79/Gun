@@ -173,6 +173,59 @@ func CancelOrder(orderbook *Orderbook, targetOrderID int64) error {
 	return orderbook.Cancel(targetOrderID)
 }
 
+// Rejection reasons specific to ModifyOrder.
+const (
+	RejectModifyNotFound = "modify_order_not_found"
+)
+
+// ModifyOrder changes a resting order's price and/or quantity.
+//
+// Semantics:
+//
+//   - Quantity-down at the same price: in-place reduction; the order
+//     keeps its FIFO queue position at the level. No matching occurs.
+//   - New quantity of zero: equivalent to a cancel.
+//   - Any price change, OR a quantity increase: the order is cancelled
+//     from the book and re-submitted with the new params. The new
+//     submission may cross and produce matches.
+//
+// The returned Result describes the re-submitted half (if any): for
+// in-place reductions it is Result{Accepted: true} with no matches; for
+// price-change or qty-up paths it is the full MatchAndAddNewOrder Result.
+func ModifyOrder(orderbook *Orderbook, orderID int64, newPrice Px, newVolume Qty) Result {
+	existing, ok := orderbook.LookupOrder(orderID)
+	if !ok {
+		return Result{Accepted: false, Reason: RejectModifyNotFound}
+	}
+
+	if newVolume.IsZero() {
+		_ = orderbook.Cancel(orderID)
+		return Result{Accepted: true}
+	}
+
+	// In-place reduction (same price, smaller quantity) preserves the
+	// FIFO queue position. Anything else loses queue priority because
+	// the re-submission has to walk the ladder afresh.
+	if newPrice.Eq(existing.Price) && newVolume.Lt(existing.Volume) {
+		if err := orderbook.ReduceVolume(orderID, newVolume); err != nil {
+			return Result{Accepted: false, Reason: err.Error()}
+		}
+		return Result{Accepted: true}
+	}
+
+	// Cancel + re-submit. The new submission preserves UserID, TIF,
+	// STP, side, type, and symbol so the order keeps its identity at
+	// the wire level even though its FIFO position is reset.
+	fresh := existing
+	fresh.Price = newPrice
+	fresh.Volume = newVolume
+
+	if err := orderbook.Cancel(orderID); err != nil {
+		return Result{Accepted: false, Reason: err.Error()}
+	}
+	return MatchAndAddNewOrder(orderbook, fresh)
+}
+
 var ErrNotValidSymbol = errors.New("item not found")
 
 func createOrderbook(symbol string) (*Orderbook, error) {
