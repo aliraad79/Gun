@@ -11,7 +11,7 @@ import (
 // buildBook seeds a book with depthPerSide orders on each side, spread across
 // numLevels price levels symmetric around midPrice (in whole units).
 func buildBook(depthPerSide, numLevels int, midPrice int64) *models.Orderbook {
-	ob := &models.Orderbook{Symbol: "BTC_USDT"}
+	ob := models.NewOrderbook("BTC_USDT")
 	r := rand.New(rand.NewPCG(1, 2))
 
 	var nextID int64 = 1
@@ -106,9 +106,13 @@ func BenchmarkCancelMidBook(b *testing.B) {
 	mid := int64(10_000)
 	ob := buildBook(2000, 200, mid)
 
+	// pick a real, currently-resting orderID near the middle of the book
+	// for the first iteration. Subsequent iterations will miss (the order
+	// is gone after the first cancel), which is fine — the benchmark also
+	// captures the cost of a "not found" lookup.
 	var targetID int64
-	if len(ob.Buy) > 100 && len(ob.Buy[100].Orders) > 0 {
-		targetID = ob.Buy[100].Orders[0].ID
+	if len(ob.Buy) > 100 && ob.Buy[100].Orders.Head() != nil {
+		targetID = ob.Buy[100].Orders.Head().Order.ID
 	}
 
 	b.ResetTimer()
@@ -158,13 +162,13 @@ func BenchmarkEndToEndMixed(b *testing.B) {
 				ID: nextID, Symbol: "BTC_USDT", Type: models.LIMIT, Side: side,
 				Price: price, Volume: vol,
 			})
-		default: // cancel a random resting order if any exist
+		default: // cancel the best-priced resting order if any exist
 			book := ob.Buy
 			if side == models.SELL {
 				book = ob.Sell
 			}
-			if len(book) > 0 && len(book[0].Orders) > 0 {
-				_ = matchEngine.CancelOrder(ob, book[0].Orders[0].ID)
+			if len(book) > 0 && book[0].Orders.Head() != nil {
+				_ = matchEngine.CancelOrder(ob, book[0].Orders.Head().Order.ID)
 			}
 		}
 	}

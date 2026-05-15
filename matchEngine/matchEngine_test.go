@@ -14,25 +14,26 @@ func p(v int64) models.Px { return models.Px(v * 1_0000_0000) }
 // q builds a Qty from a whole-number int.
 func q(v int64) models.Qty { return models.Qty(v * 1_0000_0000) }
 
-func TestMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Sell: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(10000)},
-				},
-			},
-		},
+// newBookWith returns a fresh orderbook prepopulated by Add()-ing each
+// fixture order. Using the public API keeps the tests honest: any
+// invariant the engine relies on (orderIndex, byPrice map, ladder sort)
+// is established by the same code path real orders go through.
+func newBookWith(symbol string, orders ...models.Order) *models.Orderbook {
+	ob := models.NewOrderbook(symbol)
+	for _, o := range orders {
+		ob.Add(o)
 	}
+	return ob
+}
+
+func TestMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     2,
-		Type:   models.LIMIT,
-		Side:   models.BUY,
-		Volume: q(1),
-		Price:  p(10000),
+		ID: 2, Type: models.LIMIT, Side: models.BUY,
+		Volume: q(1), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
@@ -47,27 +48,15 @@ func TestMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
 }
 
 func TestMultipleMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Sell: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.SELL, Price: p(10000)},
-					{ID: 2, Volume: q(1), Side: models.SELL, Price: p(10000)},
-					{ID: 3, Volume: q(1), Side: models.SELL, Price: p(10000)},
-				},
-			},
-		},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL, Price: p(10000), Volume: q(1)},
+		models.Order{ID: 2, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL, Price: p(10000), Volume: q(1)},
+		models.Order{ID: 3, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     4,
-		Symbol: "BTC_USDT",
-		Type:   models.LIMIT,
-		Side:   models.BUY,
-		Volume: q(3),
-		Price:  p(10000),
+		ID: 4, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY,
+		Volume: q(3), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
@@ -82,24 +71,13 @@ func TestMultipleMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
 }
 
 func TestMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Buy: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.BUY, Price: p(10000)},
-				},
-			},
-		},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     2,
-		Type:   models.LIMIT,
-		Side:   models.SELL,
-		Volume: q(1),
-		Price:  p(10000),
+		ID: 2, Type: models.LIMIT, Side: models.SELL,
+		Volume: q(1), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
@@ -114,27 +92,15 @@ func TestMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
 }
 
 func TestMultipleMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Buy: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.BUY, Price: p(10000)},
-					{ID: 2, Volume: q(1), Side: models.BUY, Price: p(10000)},
-					{ID: 3, Volume: q(1), Side: models.BUY, Price: p(10000)},
-				},
-			},
-		},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+		models.Order{ID: 2, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+		models.Order{ID: 3, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     4,
-		Symbol: "BTC_USDT",
-		Type:   models.LIMIT,
-		Side:   models.SELL,
-		Volume: q(3),
-		Price:  p(10000),
+		ID: 4, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL,
+		Volume: q(3), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
@@ -149,17 +115,9 @@ func TestMultipleMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
 }
 
 func TestCancelOrder_Success(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Buy: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.BUY},
-				},
-			},
-		},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+	)
 
 	err := matchEngine.CancelOrder(orderbook, 1)
 
@@ -168,53 +126,26 @@ func TestCancelOrder_Success(t *testing.T) {
 }
 
 func TestCancelInvalidOrder_Success(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Buy: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{ID: 1, Volume: q(1), Side: models.BUY},
-				},
-			},
-		},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+	)
 
 	err := matchEngine.CancelOrder(orderbook, 2)
 
-	assert.Error(t, err, matchEngine.ErrCancelOrderFailed)
-	assert.Equal(t, 1, len(orderbook.Buy))
-	assert.Equal(t, 1, len(orderbook.Buy[0].Orders))
+	assert.ErrorIs(t, err, models.ErrCancelOrderFailed)
+	if assert.Len(t, orderbook.Buy, 1) {
+		assert.Equal(t, 1, orderbook.Buy[0].Orders.Len())
+	}
 }
 
 func TestMatchAndAddNewOrder_sellMarketOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Buy: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{
-						ID:     1,
-						Volume: q(1),
-						Side:   models.BUY,
-						Price:  p(10000),
-						Type:   models.LIMIT,
-						Symbol: "BTC_USDT",
-					},
-				},
-			},
-		},
-		Sell:              []models.MatchEngineEntry{},
-		ConditionalOrders: []models.Order{},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.BUY, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     2,
-		Type:   models.MARKET,
-		Side:   models.SELL,
-		Volume: q(1),
-		Price:  p(10000),
+		ID: 2, Type: models.MARKET, Side: models.SELL,
+		Volume: q(1), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
@@ -229,33 +160,13 @@ func TestMatchAndAddNewOrder_sellMarketOrder(t *testing.T) {
 }
 
 func TestMatchAndAddNewOrder_buyMarketOrder(t *testing.T) {
-	orderbook := &models.Orderbook{
-		Symbol: "BTC_USDT",
-		Sell: []models.MatchEngineEntry{
-			{
-				Price: p(10000),
-				Orders: []models.Order{
-					{
-						ID:     1,
-						Volume: q(1),
-						Side:   models.SELL,
-						Price:  p(10000),
-						Type:   models.LIMIT,
-						Symbol: "BTC_USDT",
-					},
-				},
-			},
-		},
-		Buy:               []models.MatchEngineEntry{},
-		ConditionalOrders: []models.Order{},
-	}
+	orderbook := newBookWith("BTC_USDT",
+		models.Order{ID: 1, Symbol: "BTC_USDT", Type: models.LIMIT, Side: models.SELL, Price: p(10000), Volume: q(1)},
+	)
 
 	newOrder := models.Order{
-		ID:     2,
-		Type:   models.MARKET,
-		Side:   models.BUY,
-		Volume: q(1),
-		Price:  p(10000),
+		ID: 2, Type: models.MARKET, Side: models.BUY,
+		Volume: q(1), Price: p(10000),
 	}
 
 	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)

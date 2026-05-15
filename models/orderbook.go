@@ -1,122 +1,338 @@
 package models
 
 import (
+	"errors"
+	"sort"
+
 	protoModels "github.com/aliraad79/Gun/models/models"
 	log "github.com/sirupsen/logrus"
 )
 
+// MatchEngineEntry is a single price level in the order book. The Orders
+// list is FIFO (head = oldest); the level is removed from the book when
+// the list empties.
 type MatchEngineEntry struct {
 	Price  Px
-	Orders []Order
+	Orders OrderList
 }
 
-type Orderbook struct {
-	Buy               []MatchEngineEntry
-	Sell              []MatchEngineEntry
-	ConditionalOrders []Order
-	Symbol            string
-}
-
-// Add places an order on its side of the book at the correct price level.
-// Buy levels are stored in descending price order (best bid first); sell
-// levels are stored in ascending price order (best ask first). Orders at
-// the same level are appended in arrival order (FIFO head -> tail).
+// Orderbook holds bid and ask ladders for a single symbol, plus indexes
+// for O(1) order lookup and O(1) price-level lookup.
 //
-// Today this is an O(n) linear walk; Phase 2d replaces it with a
-// binary-searched insert plus an O(1) level-by-price map.
-func (orderbook *Orderbook) Add(order Order) {
+// Internal invariants (single-writer; one Orderbook per goroutine):
+//
+//   - Buy is sorted strictly descending by Price (best bid at index 0).
+//   - Sell is sorted strictly ascending by Price (best ask at index 0).
+//   - bidByPrice / askByPrice contain exactly one *MatchEngineEntry per
+//     price level present in Buy / Sell, pointing to the same struct as
+//     the corresponding slice entry.
+//   - orderIndex contains exactly one *OrderNode per resting order on
+//     either side. The node's Level back-reference always points to
+//     the level currently holding it.
+type Orderbook struct {
+	Symbol            string
+	Buy               []*MatchEngineEntry
+	Sell              []*MatchEngineEntry
+	ConditionalOrders []Order
+
+	bidByPrice map[Px]*MatchEngineEntry
+	askByPrice map[Px]*MatchEngineEntry
+	orderIndex map[int64]*OrderNode
+}
+
+// NewOrderbook returns an Orderbook with its internal indexes initialized.
+// Use this constructor everywhere; a zero-value Orderbook will not work
+// (the maps are nil).
+func NewOrderbook(symbol string) *Orderbook {
+	return &Orderbook{
+		Symbol:     symbol,
+		bidByPrice: make(map[Px]*MatchEngineEntry),
+		askByPrice: make(map[Px]*MatchEngineEntry),
+		orderIndex: make(map[int64]*OrderNode),
+	}
+}
+
+// ensureMaps lazily initializes the indexes for orderbooks constructed
+// via struct literal (test fixtures, protobuf round-trip). New code should
+// prefer NewOrderbook.
+func (ob *Orderbook) ensureMaps() {
+	if ob.bidByPrice == nil {
+		ob.bidByPrice = make(map[Px]*MatchEngineEntry)
+	}
+	if ob.askByPrice == nil {
+		ob.askByPrice = make(map[Px]*MatchEngineEntry)
+	}
+	if ob.orderIndex == nil {
+		ob.orderIndex = make(map[int64]*OrderNode)
+	}
+}
+
+// Add places order on its side of the book and registers it in the orderID
+// index. If a level at this price already exists, the order is appended to
+// the FIFO tail. Otherwise a new level is inserted at the correct sorted
+// position by binary search (O(log n) on the ladder depth).
+//
+// Returns the node so callers can hold the reference if they want; most
+// callers ignore it.
+func (ob *Orderbook) Add(order Order) *OrderNode {
+	ob.ensureMaps()
+
 	switch order.Side {
 	case BUY:
-		for idx, entry := range orderbook.Buy {
-			if order.Price.Gt(entry.Price) {
-				newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-				orderbook.Buy = append(orderbook.Buy[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Buy[idx:]...)...)
-				return
-			}
-			if order.Price.Eq(entry.Price) {
-				orderbook.Buy[idx].Orders = append(entry.Orders, order)
-				return
-			}
-		}
-		orderbook.Buy = append(orderbook.Buy, MatchEngineEntry{Orders: []Order{order}, Price: order.Price})
-
+		return ob.addSide(&ob.Buy, ob.bidByPrice, order, true)
 	case SELL:
-		for idx, entry := range orderbook.Sell {
-			if order.Price.Lt(entry.Price) {
-				newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
-				orderbook.Sell = append(orderbook.Sell[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Sell[idx:]...)...)
-				return
-			}
-			if order.Price.Eq(entry.Price) {
-				orderbook.Sell[idx].Orders = append(entry.Orders, order)
-				return
-			}
-		}
-		orderbook.Sell = append(orderbook.Sell, MatchEngineEntry{Orders: []Order{order}, Price: order.Price})
-
+		return ob.addSide(&ob.Sell, ob.askByPrice, order, false)
 	default:
 		log.Error("unexpected order.Side: ", order.Side)
+		return nil
 	}
 }
 
-func OrderbookFromProto(protoOrderbook *protoModels.Orderbook) *Orderbook {
-	var Buys []MatchEngineEntry
-	for _, entry := range protoOrderbook.GetBuy() {
-		var orders []Order
-		for _, order := range entry.GetOrders() {
-			orders = append(orders, OrderFromProto(order))
+// addSide is the shared implementation for the two ladder sides. descending
+// is true for the bid ladder (best price = highest), false for the ask
+// ladder (best price = lowest).
+func (ob *Orderbook) addSide(book *[]*MatchEngineEntry, byPrice map[Px]*MatchEngineEntry, order Order, descending bool) *OrderNode {
+	if level, ok := byPrice[order.Price]; ok {
+		node := level.Orders.PushBack(order, level)
+		ob.orderIndex[order.ID] = node
+		return node
+	}
+
+	level := &MatchEngineEntry{Price: order.Price}
+	node := level.Orders.PushBack(order, level)
+	byPrice[order.Price] = level
+	ob.orderIndex[order.ID] = node
+
+	// Find insertion index by binary search: maintain the side-specific sort.
+	idx := sort.Search(len(*book), func(i int) bool {
+		if descending {
+			return (*book)[i].Price.Lt(order.Price)
 		}
-		Buys = append(Buys, MatchEngineEntry{Orders: orders, Price: orders[0].Price})
+		return (*book)[i].Price.Gt(order.Price)
+	})
+	*book = append(*book, nil)
+	copy((*book)[idx+1:], (*book)[idx:])
+	(*book)[idx] = level
+	return node
+}
+
+// AddConditionalOrder enqueues a conditional (e.g. stop-limit) order for
+// later re-evaluation against the running trade tape.
+func (ob *Orderbook) AddConditionalOrder(order Order) {
+	ob.ConditionalOrders = append(ob.ConditionalOrders, order)
+}
+
+// ErrCancelOrderFailed is returned by Cancel when the order ID is unknown.
+var ErrCancelOrderFailed = errors.New("cancelling order failed")
+
+// Cancel removes the order with id targetID from the book. O(1) order
+// lookup via the orderID index; O(log n) on level removal if the level
+// empties.
+func (ob *Orderbook) Cancel(targetID int64) error {
+	ob.ensureMaps()
+
+	node, ok := ob.orderIndex[targetID]
+	if !ok {
+		return ErrCancelOrderFailed
 	}
-	var Sells []MatchEngineEntry
-	for _, entry := range protoOrderbook.GetSell() {
-		var orders []Order
-		for _, order := range entry.GetOrders() {
-			orders = append(orders, OrderFromProto(order))
+	level := node.Level
+	level.Orders.Remove(node)
+	delete(ob.orderIndex, targetID)
+
+	if level.Orders.IsEmpty() {
+		switch node.Order.Side {
+		case BUY:
+			ob.removeLevel(&ob.Buy, ob.bidByPrice, level, true)
+		case SELL:
+			ob.removeLevel(&ob.Sell, ob.askByPrice, level, false)
 		}
-		Sells = append(Sells, MatchEngineEntry{Orders: orders, Price: orders[0].Price})
 	}
-	var conditionalOrders []Order
-	for _, order := range protoOrderbook.ConditionalOrders {
-		conditionalOrders = append(conditionalOrders, OrderFromProto(order))
+	return nil
+}
+
+// removeLevel removes an emptied level from the ladder and the byPrice map.
+func (ob *Orderbook) removeLevel(book *[]*MatchEngineEntry, byPrice map[Px]*MatchEngineEntry, level *MatchEngineEntry, descending bool) {
+	delete(byPrice, level.Price)
+
+	// Binary search for the level's index in the side-specific ordering.
+	idx := sort.Search(len(*book), func(i int) bool {
+		if descending {
+			return (*book)[i].Price.Lte(level.Price)
+		}
+		return (*book)[i].Price.Gte(level.Price)
+	})
+	if idx >= len(*book) || (*book)[idx] != level {
+		// invariant violation; shouldn't happen but don't corrupt state
+		log.Error("removeLevel: level not found in book at expected index")
+		return
 	}
-	return &Orderbook{
-		Buy:               Buys,
-		Sell:              Sells,
-		Symbol:            protoOrderbook.GetSymbol(),
-		ConditionalOrders: conditionalOrders,
+	copy((*book)[idx:], (*book)[idx+1:])
+	(*book)[len(*book)-1] = nil
+	*book = (*book)[:len(*book)-1]
+}
+
+// removeFrontLevel pops the best-priced (index 0) level off a side after
+// it has been fully consumed by matching. O(n) memmove on the slice
+// header but constant work on the map.
+func (ob *Orderbook) removeFrontLevel(side Side) {
+	switch side {
+	case BUY:
+		if len(ob.Buy) == 0 {
+			return
+		}
+		delete(ob.bidByPrice, ob.Buy[0].Price)
+		ob.Buy[0] = nil
+		ob.Buy = ob.Buy[1:]
+	case SELL:
+		if len(ob.Sell) == 0 {
+			return
+		}
+		delete(ob.askByPrice, ob.Sell[0].Price)
+		ob.Sell[0] = nil
+		ob.Sell = ob.Sell[1:]
 	}
 }
 
-func (orderbook *Orderbook) ToProto() *protoModels.Orderbook {
-	var Buys []*protoModels.MatchEngineEntry
-	for _, entry := range orderbook.Buy {
-		var orders []*protoModels.Order
-		for _, order := range entry.Orders {
-			orders = append(orders, order.ToProto())
+// MatchTaker walks the opposite-side ladder in price-time priority and
+// fills as much of taker as the crossing levels allow. The book is mutated
+// in place: resting orders are reduced or fully removed (and their entries
+// in orderIndex deleted); price levels are removed when their FIFO list
+// empties.
+//
+// alwaysCross=true bypasses the price-crossing check and is used for
+// market orders.
+//
+// Returns the produced matches and the unfilled remainder of taker.
+func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
+	ob.ensureMaps()
+
+	var oppositeSide Side
+	switch taker.Side {
+	case BUY:
+		oppositeSide = SELL
+	case SELL:
+		oppositeSide = BUY
+	default:
+		return nil, taker.Volume
+	}
+
+	var matches []Match
+	remain := taker.Volume
+
+	for remain.IsPositive() {
+		level := ob.frontLevel(oppositeSide)
+		if level == nil {
+			break
 		}
-		Buys = append(Buys, &protoModels.MatchEngineEntry{Orders: orders, Price: orders[0].Price})
-	}
-	var Sells []*protoModels.MatchEngineEntry
-	for _, entry := range orderbook.Sell {
-		var orders []*protoModels.Order
-		for _, order := range entry.Orders {
-			orders = append(orders, order.ToProto())
+		if !alwaysCross && !crosses(taker, level.Price) {
+			break
 		}
-		Sells = append(Sells, &protoModels.MatchEngineEntry{Orders: orders, Price: orders[0].Price})
+
+		// price-time priority: oldest order at this level matches first
+		for remain.IsPositive() {
+			node := level.Orders.Head()
+			if node == nil {
+				break
+			}
+			resting := node.Order
+			fill := MinQty(remain, resting.Volume)
+
+			matches = append(matches, makeMatch(taker, resting, level.Price, fill))
+			remain = remain.Sub(fill)
+
+			if fill.Eq(resting.Volume) {
+				level.Orders.Remove(node)
+				delete(ob.orderIndex, resting.ID)
+			} else {
+				node.Order.Volume = resting.Volume.Sub(fill)
+			}
+		}
+
+		if level.Orders.IsEmpty() {
+			ob.removeFrontLevel(oppositeSide)
+		}
 	}
-	var conditionalOrders []*protoModels.Order
-	for _, order := range orderbook.ConditionalOrders {
-		conditionalOrders = append(conditionalOrders, order.ToProto())
-	}
-	return &protoModels.Orderbook{
-		Buy:               Buys,
-		Sell:              Sells,
-		Symbol:            orderbook.Symbol,
-		ConditionalOrders: conditionalOrders,
-	}
+
+	return matches, remain
 }
 
-func (Orderbook *Orderbook) AddConditionalOrder(order Order) {
-	Orderbook.ConditionalOrders = append(Orderbook.ConditionalOrders, order)
+// frontLevel returns the best-priced level on the given side, or nil if
+// that side is empty.
+func (ob *Orderbook) frontLevel(side Side) *MatchEngineEntry {
+	switch side {
+	case BUY:
+		if len(ob.Buy) == 0 {
+			return nil
+		}
+		return ob.Buy[0]
+	case SELL:
+		if len(ob.Sell) == 0 {
+			return nil
+		}
+		return ob.Sell[0]
+	}
+	return nil
+}
+
+func crosses(taker Order, restingPrice Px) bool {
+	switch taker.Side {
+	case BUY:
+		return taker.Price.Gte(restingPrice)
+	case SELL:
+		return taker.Price.Lte(restingPrice)
+	}
+	return false
+}
+
+func makeMatch(taker, resting Order, price Px, volume Qty) Match {
+	if taker.Side == BUY {
+		return Match{BuyId: taker.ID, SellId: resting.ID, Price: price, Volume: volume}
+	}
+	return Match{BuyId: resting.ID, SellId: taker.ID, Price: price, Volume: volume}
+}
+
+// ---- proto round-trip ----
+
+func OrderbookFromProto(p *protoModels.Orderbook) *Orderbook {
+	ob := NewOrderbook(p.GetSymbol())
+
+	// rebuild bid ladder
+	for _, entry := range p.GetBuy() {
+		for _, protoOrder := range entry.GetOrders() {
+			ob.Add(OrderFromProto(protoOrder))
+		}
+	}
+	// rebuild ask ladder
+	for _, entry := range p.GetSell() {
+		for _, protoOrder := range entry.GetOrders() {
+			ob.Add(OrderFromProto(protoOrder))
+		}
+	}
+	for _, protoOrder := range p.ConditionalOrders {
+		ob.ConditionalOrders = append(ob.ConditionalOrders, OrderFromProto(protoOrder))
+	}
+	return ob
+}
+
+func (ob *Orderbook) ToProto() *protoModels.Orderbook {
+	out := &protoModels.Orderbook{Symbol: ob.Symbol}
+
+	for _, level := range ob.Buy {
+		entry := &protoModels.MatchEngineEntry{Price: level.Price.String()}
+		for n := level.Orders.Head(); n != nil; n = n.Next {
+			entry.Orders = append(entry.Orders, n.Order.ToProto())
+		}
+		out.Buy = append(out.Buy, entry)
+	}
+	for _, level := range ob.Sell {
+		entry := &protoModels.MatchEngineEntry{Price: level.Price.String()}
+		for n := level.Orders.Head(); n != nil; n = n.Next {
+			entry.Orders = append(entry.Orders, n.Order.ToProto())
+		}
+		out.Sell = append(out.Sell, entry)
+	}
+	for _, order := range ob.ConditionalOrders {
+		out.ConditionalOrders = append(out.ConditionalOrders, order.ToProto())
+	}
+	return out
 }
