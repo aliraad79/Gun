@@ -36,7 +36,8 @@ func TestMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
 		Volume: q(1), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(2), matches[0].BuyId)
@@ -59,7 +60,8 @@ func TestMultipleMatchAndAddNewOrder_BuyLimitOrder(t *testing.T) {
 		Volume: q(3), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 3)
 	for _, match := range matches {
@@ -80,7 +82,8 @@ func TestMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
 		Volume: q(1), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].BuyId)
@@ -103,7 +106,8 @@ func TestMultipleMatchAndAddNewOrder_SellLimitOrder(t *testing.T) {
 		Volume: q(3), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 3)
 	for _, match := range matches {
@@ -148,7 +152,8 @@ func TestMatchAndAddNewOrder_sellMarketOrder(t *testing.T) {
 		Volume: q(1), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].BuyId)
@@ -169,7 +174,8 @@ func TestMatchAndAddNewOrder_buyMarketOrder(t *testing.T) {
 		Volume: q(1), Price: p(10000),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, newOrder)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].SellId)

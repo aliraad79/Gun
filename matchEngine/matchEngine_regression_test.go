@@ -22,7 +22,8 @@ func TestLimitMatch_FIFOAtSamePriceLevel(t *testing.T) {
 		Price: p(100), Volume: q(1),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, int64(1), matches[0].SellId, "oldest resting order (ID=1) must fill first")
@@ -48,7 +49,8 @@ func TestLimitMatch_PartialFillRestsRemainder(t *testing.T) {
 		Price: p(100), Volume: q(5),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, q(2), matches[0].Volume)
@@ -75,7 +77,8 @@ func TestLimitMatch_SweepsMultiplePriceLevels(t *testing.T) {
 		Price: p(101), Volume: q(10),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	matches := res.Matches
 
 	assert.Len(t, matches, 2, "should sweep the 100 and 101 levels and stop before 102")
 	assert.Equal(t, int64(1), matches[0].SellId)
@@ -97,7 +100,8 @@ func TestLimitMatch_TakerFullyFilledByLargerResting(t *testing.T) {
 		Price: p(100), Volume: q(3),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	matches := res.Matches
 
 	assert.Len(t, matches, 1)
 	assert.Equal(t, q(3), matches[0].Volume)
@@ -121,7 +125,8 @@ func TestMarketMatch_SweepsMultiplePriceLevels(t *testing.T) {
 		Volume: q(2),
 	}
 
-	matches := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	res := matchEngine.MatchAndAddNewOrder(orderbook, taker)
+	matches := res.Matches
 
 	assert.Len(t, matches, 2)
 	assert.Empty(t, orderbook.Sell, "both levels fully consumed")

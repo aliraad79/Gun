@@ -29,12 +29,18 @@ type MatchSink func(symbol string, matches []models.Match)
 // modifies a Market's orderbook. Useful for L2 fan-out, audit, or testing.
 type BookSink func(*models.Orderbook)
 
+// RejectSink is invoked when the engine refuses an order (post-only would
+// cross, FOK can't fully fill, malformed payload, etc.). Reason is one of
+// the matchEngine.Reject* constants.
+type RejectSink func(symbol string, order models.Order, reason string)
+
 // Options configure a Market's behavior. Zero values are sensible defaults.
 type Options struct {
-	InboxSize int     // channel buffer; default 1024
+	InboxSize int       // channel buffer; default 1024
 	OnMatch   MatchSink
 	OnBook    BookSink
-	Persist   bool    // when true, snapshot to Redis after every op
+	OnReject  RejectSink
+	Persist   bool      // when true, snapshot to Redis after every op
 }
 
 // inboxDefault is the per-market channel capacity when not overridden.
@@ -113,9 +119,19 @@ func (m *Market) handle(o op) {
 	case opNewOrder:
 		if err := models.Validate(o.order); err != nil {
 			log.Warn("invalid order dropped: ", o.order)
+			if m.opts.OnReject != nil {
+				m.opts.OnReject(m.Symbol, o.order, matchEngine.RejectInvalidOrder)
+			}
 			return
 		}
-		matches := matchEngine.MatchAndAddNewOrder(m.book, o.order)
+		res := matchEngine.MatchAndAddNewOrder(m.book, o.order)
+		if !res.Accepted {
+			if m.opts.OnReject != nil {
+				m.opts.OnReject(m.Symbol, o.order, res.Reason)
+			}
+			return
+		}
+		matches := res.Matches
 		if len(matches) > 0 {
 			matches = append(matches,
 				matchEngine.HandleConditionalOrders(m.book, matches)...)
