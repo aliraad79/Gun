@@ -17,7 +17,7 @@ type Type string
 const (
 	LIMIT      Type = "limit"
 	MARKET     Type = "market"
-	STOP_lIMIT Type = "stop_limit"
+	STOP_LIMIT Type = "stop_limit"
 )
 
 type Order struct {
@@ -26,7 +26,7 @@ type Order struct {
 	Side         Side            `json:"side"`
 	Type         Type            `json:"type"`
 	Price        decimal.Decimal `json:"price"`
-	TriggerPrice decimal.Decimal `json:"trigger_price`
+	TriggerPrice decimal.Decimal `json:"trigger_price"`
 	Volume       decimal.Decimal `json:"volume"`
 }
 
@@ -53,7 +53,7 @@ func OrderFromProto(order *protoModels.Order) Order {
 }
 
 func (order *Order) IsTriggered(price decimal.Decimal) bool {
-	if order.Type != STOP_lIMIT {
+	if order.Type != STOP_LIMIT {
 		return true
 	} else {
 		switch order.Side {

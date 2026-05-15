@@ -23,9 +23,9 @@ func (orderbook *Orderbook) Add(order Order) {
 	switch order.Side {
 	case BUY:
 		{
-			lastPirce := decimal.RequireFromString("100000000000000")
+			lastPrice := decimal.RequireFromString("100000000000000")
 			for idx, entry := range orderbook.Buy {
-				if entry.Price.LessThan(order.Price) && order.Price.LessThan(lastPirce) {
+				if entry.Price.LessThan(order.Price) && order.Price.LessThan(lastPrice) {
 					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
 					orderbook.Buy = append(orderbook.Buy[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Buy[idx:]...)...)
 					return
@@ -33,16 +33,16 @@ func (orderbook *Orderbook) Add(order Order) {
 					orderbook.Buy[idx].Orders = append(entry.Orders, order)
 					return
 				}
-				lastPirce = entry.Price
+				lastPrice = entry.Price
 			}
 			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
 			orderbook.Buy = append(orderbook.Buy, newEntry)
 		}
 	case SELL:
 		{
-			lastPirce := decimal.Zero
+			lastPrice := decimal.Zero
 			for idx, entry := range orderbook.Sell {
-				if entry.Price.GreaterThan(order.Price) && order.Price.GreaterThan(lastPirce) {
+				if entry.Price.GreaterThan(order.Price) && order.Price.GreaterThan(lastPrice) {
 					newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}
 					orderbook.Sell = append(orderbook.Sell[:idx], append([]MatchEngineEntry{newEntry}, orderbook.Sell[idx:]...)...)
 					return
@@ -50,7 +50,7 @@ func (orderbook *Orderbook) Add(order Order) {
 					orderbook.Sell[idx].Orders = append(entry.Orders, order)
 					return
 				}
-				lastPirce = entry.Price
+				lastPrice = entry.Price
 			}
 
 			newEntry := MatchEngineEntry{Orders: []Order{order}, Price: order.Price}

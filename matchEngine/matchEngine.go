@@ -37,7 +37,7 @@ func MatchAndAddNewOrder(orderbook *Orderbook, newOrder Order) []Match {
 		return handleLimitOrder(orderbook, newOrder)
 	case MARKET:
 		return handleMarketOrder(orderbook, newOrder)
-	case STOP_lIMIT:
+	case STOP_LIMIT:
 		return handleStopLimitOrder(orderbook, newOrder)
 	default:
 		panic(fmt.Sprintf("unexpected models.Type: %#v", newOrder.Type))
