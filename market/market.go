@@ -12,9 +12,11 @@ package market
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/aliraad79/Gun/journal"
 	"github.com/aliraad79/Gun/matchEngine"
+	"github.com/aliraad79/Gun/metrics"
 	"github.com/aliraad79/Gun/models"
 	"github.com/aliraad79/Gun/persistance"
 	log "github.com/sirupsen/logrus"
@@ -166,10 +168,14 @@ func (m *Market) run(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (m *Market) handle(o op) {
+	start := time.Now()
+	opName := "new"
+
 	switch o.kind {
 	case opNewOrder:
 		if err := models.Validate(o.order); err != nil {
 			log.Warn("invalid order dropped: ", o.order)
+			metrics.Order(m.Symbol, "rejected_"+matchEngine.RejectInvalidOrder)
 			if m.opts.OnReject != nil {
 				m.opts.OnReject(m.Symbol, o.order, matchEngine.RejectInvalidOrder)
 			}
@@ -179,42 +185,53 @@ func (m *Market) handle(o op) {
 		// between Append and the engine call replays cleanly; a crash
 		// before Append loses the op entirely, which is the correct
 		// behavior (the producer is responsible for retry on timeout).
+		jStart := time.Now()
 		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
 			Kind: journal.RecNew, Order: o.order,
 		}); err != nil {
 			log.Error("journal append failed; dropping order ", o.order.ID, ": ", err)
+			metrics.Order(m.Symbol, "rejected_journal_append_failed")
 			if m.opts.OnReject != nil {
 				m.opts.OnReject(m.Symbol, o.order, "journal_append_failed")
 			}
 			return
 		}
+		metrics.JournalAppendDuration(time.Since(jStart))
 
 		res := matchEngine.MatchAndAddNewOrder(m.book, o.order)
 		if !res.Accepted {
+			metrics.Order(m.Symbol, "rejected_"+res.Reason)
 			if m.opts.OnReject != nil {
 				m.opts.OnReject(m.Symbol, o.order, res.Reason)
 			}
 			return
 		}
+		metrics.Order(m.Symbol, "accepted")
 		matches := res.Matches
 		if len(matches) > 0 {
 			matches = append(matches,
 				matchEngine.HandleConditionalOrders(m.book, matches)...)
+			metrics.Matches(m.Symbol, len(matches))
 			if m.opts.OnMatch != nil {
 				m.opts.OnMatch(m.Symbol, matches)
 			}
 		}
 
 	case opCancel:
+		opName = "cancel"
+		jStart := time.Now()
 		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
 			Kind: journal.RecCancel, OrderID: o.order.ID, Symbol: m.Symbol,
 		}); err != nil {
 			log.Error("journal append failed; dropping cancel ", o.order.ID, ": ", err)
 			return
 		}
+		metrics.JournalAppendDuration(time.Since(jStart))
 		_ = matchEngine.CancelOrder(m.book, o.order.ID)
 
 	case opModify:
+		opName = "modify"
+		jStart := time.Now()
 		if err := m.opts.Journal.Append(m.Symbol, journal.Record{
 			Kind: journal.RecModify, OrderID: o.order.ID, Symbol: m.Symbol,
 			NewPrice: o.newPrice, NewVolume: o.newVolume,
@@ -222,6 +239,7 @@ func (m *Market) handle(o op) {
 			log.Error("journal append failed; dropping modify ", o.order.ID, ": ", err)
 			return
 		}
+		metrics.JournalAppendDuration(time.Since(jStart))
 		res := matchEngine.ModifyOrder(m.book, o.order.ID, o.newPrice, o.newVolume)
 		if !res.Accepted {
 			if m.opts.OnReject != nil {
@@ -229,8 +247,11 @@ func (m *Market) handle(o op) {
 			}
 			break
 		}
-		if len(res.Matches) > 0 && m.opts.OnMatch != nil {
-			m.opts.OnMatch(m.Symbol, res.Matches)
+		if len(res.Matches) > 0 {
+			metrics.Matches(m.Symbol, len(res.Matches))
+			if m.opts.OnMatch != nil {
+				m.opts.OnMatch(m.Symbol, res.Matches)
+			}
 		}
 	}
 
@@ -240,6 +261,12 @@ func (m *Market) handle(o op) {
 	if m.opts.OnBook != nil {
 		m.opts.OnBook(m.book)
 	}
+
+	metrics.OpDuration(m.Symbol, opName, time.Since(start))
+	metrics.BookDepth(m.Symbol,
+		m.book.LevelCount(models.BUY), m.book.OrderCount(models.BUY),
+		m.book.LevelCount(models.SELL), m.book.OrderCount(models.SELL),
+	)
 }
 
 // Book returns the Market's orderbook. The returned pointer is only safe

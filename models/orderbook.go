@@ -205,6 +205,37 @@ func (ob *Orderbook) NextSeq() uint64 {
 	return ob.seq
 }
 
+// LevelCount returns the number of distinct price levels on the given
+// side. O(1).
+func (ob *Orderbook) LevelCount(side Side) int {
+	switch side {
+	case BUY:
+		return len(ob.Buy)
+	case SELL:
+		return len(ob.Sell)
+	}
+	return 0
+}
+
+// OrderCount returns the number of resting orders on the given side.
+// O(L) on the level count (cheap for realistic books).
+func (ob *Orderbook) OrderCount(side Side) int {
+	var book []*MatchEngineEntry
+	switch side {
+	case BUY:
+		book = ob.Buy
+	case SELL:
+		book = ob.Sell
+	default:
+		return 0
+	}
+	n := 0
+	for _, l := range book {
+		n += l.Orders.Len()
+	}
+	return n
+}
+
 // Seq returns the current sequence value without advancing it. Exposed
 // for snapshot writers and tests.
 func (ob *Orderbook) Seq() uint64 { return ob.seq }
