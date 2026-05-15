@@ -31,12 +31,12 @@ and clearing. It owns *one* concern: matching, fast and correctly.
 | Snapshot persistence to Redis (protobuf) | ✅ |
 | Conditional / triggered order re-evaluation | ✅ |
 | Kafka-driven order ingest | ✅ |
-| Self-trade prevention (STP) | 🛠 planned (Phase 3) |
-| IOC / FOK / post-only time-in-force | 🛠 planned (Phase 3) |
-| Order modify / replace | 🛠 planned (Phase 3) |
-| L2 market-data publishing | 🛠 planned (Phase 3) |
-| Sequence numbers + gap detection | 🛠 planned (Phase 3) |
-| Journal-based recovery | 🛠 planned (Phase 3) |
+| Self-trade prevention (STP) — four modes | ✅ |
+| IOC / FOK / post-only time-in-force | ✅ |
+| Order modify / replace (FIFO-preserving qty-down) | ✅ |
+| L2 (aggregated-by-price) market-data publishing | ✅ |
+| Strictly-monotonic per-symbol sequence numbers | ✅ |
+| Journal-based crash recovery (mandatory WAL) | ✅ |
 
 ---
 
@@ -163,9 +163,10 @@ shippable and verified against the same benchmarks.
   the hot path, price-indexed ladder, O(1) cancel, per-symbol sharding,
   P50/P99/P99.9 latency tracking. Achieved ~2.35M ops/sec/core on the
   mixed workload — 477× faster than the Phase 1 baseline.
-- **Phase 3 — Production features.** Self-trade prevention, IOC / FOK /
-  post-only time-in-force flags, order modify, L2 market-data publishing,
-  sequence numbers, snapshot + journal-based recovery, audit trail.
+- **Phase 3 — Production features.** *(✅ shipped)* Self-trade prevention
+  (four modes), IOC / FOK / post-only time-in-force, order modify
+  (FIFO-preserving qty-down), L2 market-data publishing, per-symbol
+  sequence numbers, mandatory journal-based crash recovery.
 - **Phase 4 — Operability.** Prometheus metrics, OpenTelemetry tracing,
   graceful shutdown, replay tooling, fuzz harness for the matching loop.
 
@@ -193,12 +194,29 @@ JSON-encoded:
 {
   "id": 1,
   "symbol": "BTC_USDT",
+  "user_id": 42,
   "side": "buy",
   "type": "limit",
+  "time_in_force": "ioc",
+  "stp": "cancel_taker",
   "price": "10000",
   "volume": "1.5"
 }
 ```
+
+Optional fields default to legacy / safe behavior:
+
+| Field | Default | Effect of default |
+|---|---|---|
+| `user_id`       | `0`              | Self-trade prevention disabled (anonymous order) |
+| `time_in_force` | `""` → `gtc`     | Unfilled remainder rests on the book |
+| `stp`           | `""`             | If `user_id != 0`, normalizes to `cancel_taker`; otherwise STP off |
+| `trigger_price` | `"0"`            | Only meaningful for `stop_limit` orders |
+
+Time-in-force values: `gtc` (default), `ioc`, `fok`, `post_only`.
+
+STP modes: `cancel_taker` (safest default), `cancel_resting`,
+`cancel_both`, `decrement`. See **Order types** below for semantics.
 
 The Kafka message **key** controls the command:
 
@@ -214,15 +232,83 @@ preferred — round-trips without precision loss) or JSON numbers
 (`10000.50`). Internally everything is scaled-int64 with 8 fractional
 decimal digits.
 
+### Durability
+
+Crash recovery is mandatory, not optional. On startup the process opens a
+per-symbol journal directory (default `./data/journal`) and replays each
+symbol's journal before accepting new orders. Configure via environment:
+
+| Variable           | Default            | Meaning |
+|---|---|---|
+| `GUN_JOURNAL_DIR`   | `./data/journal`   | Directory for per-symbol `*.journal` files |
+| `GUN_JOURNAL_FSYNC` | `true`             | `fsync` after every append. Set `false` for throughput-vs-durability tuning |
+
+Tests and benchmarks that genuinely don't need durability must opt out
+explicitly by passing `&journal.Discard{}` as `Options.Journal` — there
+is no implicit "no-journal" mode in production code.
+
 ---
 
 ## Order types
 
-- **Limit** — rests on the book until matched or cancelled.
+- **Limit** — rests on the book until matched or cancelled. Honors
+  every time-in-force flag below.
 - **Market** — matches against the best available prices and drops any
   unfilled remainder.
 - **Stop-limit** — held off-book until the trigger price is observed,
   then promoted to a limit order. Re-evaluated on every match.
+
+### Time-in-force (limit orders)
+
+- **GTC** (default) — good-til-cancelled. Unfilled remainder rests.
+- **IOC** — immediate-or-cancel. Match what crosses, drop the rest.
+- **FOK** — fill-or-kill. Reject if the order can not be filled in full
+  in one pass (pre-flight walks the opposite ladder without mutating).
+- **post_only** — reject if the order would take liquidity (cross the
+  spread). Guarantees the maker fee tier.
+
+### Self-trade prevention (when `user_id` is set)
+
+The taker's STP mode decides what happens when the engine would otherwise
+match the taker against a resting order belonging to the same `user_id`.
+
+- **cancel_taker** *(default when `user_id` set)* — halt matching, drop
+  the taker remainder, leave the resting order alone. Safest mode.
+- **cancel_resting** — cancel the resting order and continue matching the
+  taker against the next-best.
+- **cancel_both** — cancel both sides.
+- **decrement** — net both sides by `min(taker, resting)`. No trade is
+  reported (it's a cancel in disguise); the taker continues if any
+  quantity remains.
+
+### Order modify
+
+The engine accepts in-place modifications:
+
+- **quantity-down at the same price** keeps the order's FIFO queue
+  position. No matching occurs.
+- **quantity-up or any price change** is equivalent to cancel + re-add.
+  Queue position is lost, and the new submission may cross and produce
+  matches.
+- **new quantity of zero** is equivalent to cancel.
+
+### L2 market-data deltas
+
+Every change to a price level's aggregate quantity emits a `BookDelta`:
+
+```go
+type BookDelta struct {
+    Seq    uint64 // monotonic per-symbol; pair with Match.Seq
+    Symbol string
+    Side   Side
+    Price  Px
+    Qty    Qty   // new aggregate; 0 means the level was removed
+}
+```
+
+Wire it up via `market.Options.OnL2`. The callback runs synchronously on
+the symbol's processing goroutine — spawn a goroutine inside it if you
+need async fan-out.
 
 ---
 
@@ -252,15 +338,21 @@ run.
 ├── market/                 # per-symbol Market + Registry (sharded execution)
 │   ├── market.go
 │   ├── registry.go
-│   └── market_test.go
+│   ├── market_test.go
+│   └── market_journal_test.go
 ├── matchEngine/            # matching loop dispatch + benchmarks
-│   ├── matchEngine.go
+│   ├── matchEngine.go              # limit/market/stop-limit dispatch + TIF + modify
 │   ├── matchEngine_test.go
 │   ├── matchEngine_regression_test.go
+│   ├── matchEngine_tif_test.go
+│   ├── matchEngine_stp_test.go
+│   ├── matchEngine_modify_test.go
+│   ├── matchEngine_seq_test.go
 │   ├── matchEngine_bench_test.go
 │   └── matchEngine_latency_test.go
-├── models/                 # Order / Orderbook / Match / Px / Qty + linked list
-├── persistance/            # Redis snapshot
+├── models/                 # Order / Orderbook / Match / Px / Qty / BookDelta + linked list
+├── journal/                # mandatory write-ahead log for crash recovery
+├── persistance/            # Redis snapshot (legacy snapshot path)
 ├── utils/                  # env helpers, race-safe mutex registry
 ├── bench/                  # baseline benchmark outputs
 └── loadTest/               # end-to-end Kafka load generator
