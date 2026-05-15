@@ -61,7 +61,7 @@ func (orderbook *Orderbook) Add(order Order) {
 	}
 }
 
-func OrderbookFromProto(protoOrderbook protoModels.Orderbook) *Orderbook {
+func OrderbookFromProto(protoOrderbook *protoModels.Orderbook) *Orderbook {
 	var Buys []MatchEngineEntry
 	for _, entry := range protoOrderbook.GetBuy() {
 		var orders []Order
