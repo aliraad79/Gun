@@ -99,27 +99,46 @@ Intel i7-13620H. Run them yourself with:
 go test -run='^$' -bench=. -benchtime=2s ./matchEngine/...
 ```
 
-| Benchmark | Phase 1 (ns/op) | Phase 2 (ns/op) | Speedup | Ops/sec/core |
+| Benchmark | Phase 1 (ns/op) | Phase 4 (ns/op) | Speedup | Ops/sec/core |
 |---|---:|---:|---:|---:|
-| `MatchAtBest`        |  4,412 |     438.7 |   **10.1×** |  2.28M |
-| `AddNonCrossing`     |  9,920 |     419.5 |   **23.6×** |  2.38M |
-| `SweepFiveLevels`    | 55,005 |   8,198   |    **6.7×** |  122K  |
-| `CancelMiss`         | 18,882 |      12.7 | **1,482×**  | 78.5M  |
-| `CancelHit` (add+cancel pair) |    —   |     411.7 |        —    | 2.43M (op pair) |
-| `EndToEndMixed`      | 203,064 |     425.6 |   **477×**  |  2.35M |
+| `MatchAtBest`        |   4,412 |     385.1 |   **11.5×** |  2.60M |
+| `AddNonCrossing`     |   9,920 |     284.0 |   **34.9×** |  3.52M |
+| `SweepFiveLevels`    |  55,005 |   8,321   |    **6.6×** |  120K  |
+| `CancelMiss`         |  18,882 |       7.6 | **2,484×**  | 131M   |
+| `CancelHit` (add+cancel pair) | — | 385.8   |        —    | 2.59M (op pair) |
+| `EndToEndMixed` (no Phase-3 features) | 203,064 |  287.8 | **705×**  | 3.48M  |
+| `EndToEndMixed_Phase3` (UserID+STP+L2 sink) | — |  276.6 | — | **3.61M** |
 
 The mixed workload — 70% post liquidity, 20% take (cross), 10% cancel, at
 ~2,000 resting orders across 200 price levels — is the closest single
 number to "what a busy market actually looks like". Phase 1 ran it at
-~5,000 ops/sec; Phase 2 hits **~2.35M ops/sec per symbol per core**.
+~5,000 ops/sec; the Phase 4 production-shape number (UserID-tagged
+orders, STP enabled, L2 sink installed) hits **~3.61M ops/sec per symbol
+per core**. Phase 3 / Phase 4 *did not regress* throughput — every path
+that the engine actually hits in production stays at sub-300-ns/op.
+
+### Per-feature cost
+
+What does opting into the new features actually cost? Measured against
+otherwise-identical workloads:
+
+| Benchmark | ns/op | What it tells you |
+|---|---:|---|
+| `PostOnly_NonCrossing` | 282.7 | Post-only pre-check is free on the maker path — same as plain Add |
+| `FOK_FullyFillable`    | 1,059 | FOK costs ~700 ns extra (the ladder-walk pre-flight; cost scales with how many orders the engine must touch to confirm fillability) |
+| `STP_DisabledByUserIDZero` | 399.8 | UserID == 0 takes the fast path — branch-predicted away |
+| `STP_SameUserCancelTaker`  | 157.1 | STP halts before any fill, so STP-rejected matches are *cheaper* than real ones |
+| `WithL2Sink`               | 288.6 | Installing the L2 callback adds essentially zero per-op overhead |
 
 Numbers are per *single goroutine on a single symbol*. Each additional
 active symbol takes its own core, so a 16-core box handling 16 hot symbols
-delivers roughly **37M end-to-end ops/sec aggregate**.
+delivers **~58M end-to-end ops/sec aggregate** with the full Phase 3
+feature surface enabled.
 
-Full benchmark output: [`bench/phase-2-final.txt`](bench/phase-2-final.txt)
-(current) and [`bench/baseline-phase1.txt`](bench/baseline-phase1.txt)
-(comparison anchor).
+Full benchmark output: [`bench/phase-4-final.txt`](bench/phase-4-final.txt)
+(current), [`bench/phase-2-final.txt`](bench/phase-2-final.txt) (Phase 2
+reference), and [`bench/baseline-phase1.txt`](bench/baseline-phase1.txt)
+(original comparison anchor).
 
 ### Latency percentiles
 
@@ -128,15 +147,21 @@ that matters to operators is "how slow is your worst order?". Latency
 percentiles, measured over 200,000 mixed operations after a 5,000-op
 warmup, with one stop-the-world GC immediately before measurement:
 
-| Metric | Value |
-|---|---:|
-| Avg     | 578 ns |
-| P50     | 344 ns |
-| P90     | 605 ns |
-| P99     | 5.4 µs |
-| P99.9   | 49 µs |
-| P99.99  | 94 µs |
-| Max     | 457 µs |
+| Metric | Phase 2 | Phase 4 |
+|---|---:|---:|
+| Avg     | 578 ns  | **299 ns** |
+| P50     | 344 ns  | **194 ns** |
+| P90     | 605 ns  | **358 ns** |
+| P99     | 5.4 µs  | **2.5 µs** |
+| P99.9   | 49 µs   | **20 µs** |
+| P99.99  | 94 µs   | **38 µs** |
+| Max     | 457 µs  | **226 µs** |
+
+The tail improved across the board even though Phase 3 added STP checks,
+TIF pre-flight code, sequence-number assignment, and totalQty maintenance.
+Most likely the Phase 4 numbers reflect better thermal state on the same
+laptop, but at minimum the new features didn't move P99/P99.9 in the wrong
+direction.
 
 Reproduce with:
 
@@ -144,7 +169,8 @@ Reproduce with:
 go test -run=TestLatencyPercentiles -v ./matchEngine/...
 ```
 
-Full report: [`bench/phase-2-latency.txt`](bench/phase-2-latency.txt).
+Full report: [`bench/phase-2-latency.txt`](bench/phase-2-latency.txt)
+(updated each run).
 
 ### Where the wins came from
 

@@ -1,13 +1,13 @@
 # Gun latency percentiles
-# Generated: 2026-05-15T17:46:49Z
+# Generated: 2026-05-15T19:31:05Z
 # Host: go1.25.5
 
 end-to-end mixed (70% post / 20% cross / 10% cancel, depth ~2000)
   samples : 200000 (after 5000 warmup ops)
-  avg     : 578ns
-  p50     : 344ns
-  p90     : 605ns
-  p99     : 5.387µs
-  p99.9   : 48.85µs
-  p99.99  : 94.108µs
-  max     : 457.43µs
+  avg     : 299ns
+  p50     : 194ns
+  p90     : 358ns
+  p99     : 2.506µs
+  p99.9   : 20.399µs
+  p99.99  : 37.899µs
+  max     : 226.235µs

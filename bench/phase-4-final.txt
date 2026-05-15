@@ -1,0 +1,24 @@
+goos: linux
+goarch: amd64
+pkg: github.com/aliraad79/Gun/matchEngine
+cpu: 13th Gen Intel(R) Core(TM) i7-13620H
+BenchmarkAddNonCrossing-16     	 2064658	       284.0 ns/op
+BenchmarkMatchAtBest-16        	 1553373	       385.1 ns/op
+BenchmarkSweepFiveLevels-16    	   71720	      8321 ns/op
+BenchmarkCancelMiss-16         	76623576	         7.619 ns/op
+BenchmarkCancelHit-16          	 1748553	       385.8 ns/op
+BenchmarkEndToEndMixed-16      	 2155110	       287.8 ns/op
+PASS
+ok  	github.com/aliraad79/Gun/matchEngine	192.776s
+goos: linux
+goarch: amd64
+pkg: github.com/aliraad79/Gun/matchEngine
+cpu: 13th Gen Intel(R) Core(TM) i7-13620H
+BenchmarkPostOnly_NonCrossing-16        	 2183611	       282.7 ns/op
+BenchmarkFOK_FullyFillable-16           	  523110	      1059 ns/op
+BenchmarkSTP_DisabledByUserIDZero-16    	 1509712	       399.8 ns/op
+BenchmarkSTP_SameUserCancelTaker-16     	 3717994	       157.1 ns/op
+BenchmarkWithL2Sink-16                  	 1989621	       288.6 ns/op
+BenchmarkEndToEndMixed_Phase3-16        	 2240596	       276.6 ns/op
+PASS
+ok  	github.com/aliraad79/Gun/matchEngine	441.955s
