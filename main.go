@@ -29,7 +29,7 @@ func main() {
 
 	persistance.InitClient()
 
-	mutexes := make(map[string]*sync.Mutex)
+	var mutexes utils.SymbolMutex
 
 	log.Info("Starting Match Engine")
 
@@ -42,10 +42,10 @@ func main() {
 
 				switch instrument.Command {
 				case NEW_ORDER_CMD:
-					mutex := utils.GetOrCreateMutex(mutexes, instrument.Value.Symbol)
+					mutex := mutexes.Get(instrument.Value.Symbol)
 					processNewOrder(mutex, instrument.Value)
 				case CANCEL_ORDER_CMD:
-					mutex := utils.GetOrCreateMutex(mutexes, instrument.Value.Symbol)
+					mutex := mutexes.Get(instrument.Value.Symbol)
 					cancelOrder(mutex, instrument.Value)
 				case END_LOADTEST_CMD:
 					mu.Lock()

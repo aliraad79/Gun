@@ -22,11 +22,18 @@ func Contains(list []string, target string) bool {
 	return false
 }
 
-func GetOrCreateMutex(memory map[string]*sync.Mutex, symbol string) *sync.Mutex {
-	_, exists := memory[symbol]
-	if exists {
-		return memory[symbol]
-	} else {
-		return &sync.Mutex{}
+// SymbolMutex is a concurrency-safe per-symbol lock registry.
+// The zero value is ready to use.
+type SymbolMutex struct {
+	m sync.Map // map[string]*sync.Mutex
+}
+
+// Get returns the mutex for the given symbol, creating one on first access.
+// Safe for concurrent use across goroutines.
+func (s *SymbolMutex) Get(symbol string) *sync.Mutex {
+	if v, ok := s.m.Load(symbol); ok {
+		return v.(*sync.Mutex)
 	}
+	v, _ := s.m.LoadOrStore(symbol, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
