@@ -35,6 +35,11 @@ type Orderbook struct {
 	Sell              []*MatchEngineEntry
 	ConditionalOrders []Order
 
+	// seq is the next sequence number to hand out to a Match. Strictly
+	// monotonic per-symbol; persisted into snapshots so recovery resumes
+	// at the next un-used value.
+	seq uint64
+
 	bidByPrice map[Px]*MatchEngineEntry
 	askByPrice map[Px]*MatchEngineEntry
 	orderIndex map[int64]*OrderNode
@@ -121,6 +126,22 @@ func (ob *Orderbook) addSide(book *[]*MatchEngineEntry, byPrice map[Px]*MatchEng
 func (ob *Orderbook) AddConditionalOrder(order Order) {
 	ob.ConditionalOrders = append(ob.ConditionalOrders, order)
 }
+
+// NextSeq returns the next match sequence number for this symbol and
+// advances the counter. The single-writer-per-symbol invariant means no
+// locking is needed.
+func (ob *Orderbook) NextSeq() uint64 {
+	ob.seq++
+	return ob.seq
+}
+
+// Seq returns the current sequence value without advancing it. Exposed
+// for snapshot writers and tests.
+func (ob *Orderbook) Seq() uint64 { return ob.seq }
+
+// SetSeq sets the next-to-be-used sequence number. Used by snapshot
+// recovery to resume the counter where it left off.
+func (ob *Orderbook) SetSeq(s uint64) { ob.seq = s }
 
 // ErrCancelOrderFailed is returned by Cancel when the order ID is unknown.
 var ErrCancelOrderFailed = errors.New("cancelling order failed")
@@ -253,7 +274,9 @@ func (ob *Orderbook) MatchTaker(taker Order, alwaysCross bool) ([]Match, Qty) {
 
 			fill := MinQty(remain, resting.Volume)
 
-			matches = append(matches, makeMatch(taker, resting, level.Price, fill))
+			m := makeMatch(taker, resting, level.Price, fill)
+			m.Seq = ob.NextSeq()
+			matches = append(matches, m)
 			remain = remain.Sub(fill)
 
 			if fill.Eq(resting.Volume) {
@@ -358,6 +381,7 @@ func makeMatch(taker, resting Order, price Px, volume Qty) Match {
 
 func OrderbookFromProto(p *protoModels.Orderbook) *Orderbook {
 	ob := NewOrderbook(p.GetSymbol())
+	ob.SetSeq(p.GetSeq())
 
 	// rebuild bid ladder
 	for _, entry := range p.GetBuy() {
@@ -378,7 +402,7 @@ func OrderbookFromProto(p *protoModels.Orderbook) *Orderbook {
 }
 
 func (ob *Orderbook) ToProto() *protoModels.Orderbook {
-	out := &protoModels.Orderbook{Symbol: ob.Symbol}
+	out := &protoModels.Orderbook{Symbol: ob.Symbol, Seq: ob.seq}
 
 	for _, level := range ob.Buy {
 		entry := &protoModels.MatchEngineEntry{Price: level.Price.String()}
