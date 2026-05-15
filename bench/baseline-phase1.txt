@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/aliraad79/Gun/matchEngine
+cpu: 13th Gen Intel(R) Core(TM) i7-13620H
+BenchmarkAddNonCrossing-16     	  247000	      9920 ns/op
+BenchmarkMatchAtBest-16        	  568622	      4412 ns/op
+BenchmarkSweepFiveLevels-16    	   43803	     55005 ns/op
+BenchmarkCancelMidBook-16      	  123346	     18882 ns/op
+BenchmarkEndToEndMixed-16      	   46519	    203064 ns/op
+PASS
+ok  	github.com/aliraad79/Gun/matchEngine	208.943s
