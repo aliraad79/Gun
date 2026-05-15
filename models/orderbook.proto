@@ -4,13 +4,12 @@ package models;
 
 option go_package = "./models";
 
-
-// Define a Person message
 message Orderbook {
   string symbol = 1;
   repeated MatchEngineEntry buy = 2;
   repeated MatchEngineEntry sell = 3;
-  repeated Order ConditionalOrders = 4; 
+  repeated Order ConditionalOrders = 4;
+  uint64 seq = 5;
 }
 
 message MatchEngineEntry {
@@ -26,4 +25,7 @@ message Order {
     string volume = 5;
     string type = 6;
     string trigger_price = 7;
+    int64 user_id = 8;
+    string time_in_force = 9;
+    string stp = 10;
 }

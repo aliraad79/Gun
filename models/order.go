@@ -21,24 +21,100 @@ const (
 	STOP_LIMIT Type = "stop_limit"
 )
 
+// TIF (Time-in-Force) controls what happens to an order's unfilled
+// remainder after a single matching pass.
+type TIF string
+
+const (
+	// GTC (good-til-cancelled) is the default. Unfilled remainder rests
+	// on the book until matched or cancelled.
+	GTC TIF = ""
+
+	// IOC (immediate-or-cancel) matches what crosses immediately and
+	// drops the unfilled remainder. Useful for taker-only strategies.
+	IOC TIF = "ioc"
+
+	// FOK (fill-or-kill) requires that the order can be fully matched
+	// in a single pass; otherwise the entire order is rejected without
+	// any partial fill.
+	FOK TIF = "fok"
+
+	// PostOnly rejects the order if it would cross the spread (i.e.
+	// take liquidity). Used by market makers to guarantee a maker fee
+	// tier on every order.
+	PostOnly TIF = "post_only"
+)
+
+// STPMode (Self-Trade Prevention) controls what happens when a taker
+// crosses against a resting order belonging to the same UserID.
+type STPMode string
+
+const (
+	// STPNone disables self-trade prevention. Same-user trades will
+	// match like any other. Default when UserID == 0 (legacy orders).
+	STPNone STPMode = ""
+
+	// STPCancelTaker (the safe default when UserID is set) cancels the
+	// remainder of the incoming taker against any of its own orders.
+	STPCancelTaker STPMode = "cancel_taker"
+
+	// STPCancelResting cancels the resting order so the taker can
+	// proceed and either match the next-best resting or rest itself.
+	STPCancelResting STPMode = "cancel_resting"
+
+	// STPCancelBoth cancels both sides.
+	STPCancelBoth STPMode = "cancel_both"
+
+	// STPDecrement reduces both sides by the smaller of the two
+	// quantities and cancels the resting; the taker may then continue
+	// against other resting orders.
+	STPDecrement STPMode = "decrement"
+)
+
 type Order struct {
-	ID           int64  `json:"id"`
-	Symbol       string `json:"symbol"`
-	Side         Side   `json:"side"`
-	Type         Type   `json:"type"`
-	Price        Px     `json:"price"`
-	TriggerPrice Px     `json:"trigger_price"`
-	Volume       Qty    `json:"volume"`
+	ID           int64   `json:"id"`
+	Symbol       string  `json:"symbol"`
+	UserID       int64   `json:"user_id,omitempty"`
+	Side         Side    `json:"side"`
+	Type         Type    `json:"type"`
+	TimeInForce  TIF     `json:"time_in_force,omitempty"`
+	STP          STPMode `json:"stp,omitempty"`
+	Price        Px      `json:"price"`
+	TriggerPrice Px      `json:"trigger_price"`
+	Volume       Qty     `json:"volume"`
+}
+
+// Normalize fills in defaults for optional fields. Safe to call repeatedly.
+// New code should call this before submitting an order; the matching
+// engine also calls it defensively.
+func (order *Order) Normalize() {
+	if order.TimeInForce == "" {
+		order.TimeInForce = GTC
+	}
+	if order.STP == "" && order.UserID != 0 {
+		// If the caller set UserID but not STP, default to the safe
+		// behavior: cancel the taker's unfilled remainder against
+		// itself. Anything else would let the same-user trade through.
+		order.STP = STPCancelTaker
+	}
 }
 
 func (order *Order) ToProto() *protoModels.Order {
+	triggerStr := ""
+	if !order.TriggerPrice.IsZero() {
+		triggerStr = order.TriggerPrice.String()
+	}
 	return &protoModels.Order{
-		Id:     order.ID,
-		Symbol: order.Symbol,
-		Side:   string(order.Side),
-		Price:  order.Price.String(),
-		Volume: order.Volume.String(),
-		Type:   string(order.Type),
+		Id:           order.ID,
+		Symbol:       order.Symbol,
+		Side:         string(order.Side),
+		Price:        order.Price.String(),
+		Volume:       order.Volume.String(),
+		Type:         string(order.Type),
+		TriggerPrice: triggerStr,
+		UserId:       order.UserID,
+		TimeInForce:  string(order.TimeInForce),
+		Stp:          string(order.STP),
 	}
 }
 
@@ -55,13 +131,24 @@ func OrderFromProto(order *protoModels.Order) Order {
 	if err != nil {
 		panic("models: corrupt order volume in snapshot: " + err.Error())
 	}
+	var trigger Px
+	if s := order.GetTriggerPrice(); s != "" {
+		trigger, err = ParsePx(s)
+		if err != nil {
+			panic("models: corrupt trigger price in snapshot: " + err.Error())
+		}
+	}
 	return Order{
-		ID:     order.GetId(),
-		Symbol: order.GetSymbol(),
-		Side:   Side(order.Side),
-		Type:   Type(order.GetType()),
-		Price:  price,
-		Volume: vol,
+		ID:           order.GetId(),
+		Symbol:       order.GetSymbol(),
+		UserID:       order.GetUserId(),
+		Side:         Side(order.Side),
+		Type:         Type(order.GetType()),
+		TimeInForce:  TIF(order.GetTimeInForce()),
+		STP:          STPMode(order.GetStp()),
+		Price:        price,
+		TriggerPrice: trigger,
+		Volume:       vol,
 	}
 }
 
